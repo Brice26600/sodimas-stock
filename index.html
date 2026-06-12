@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SODIMAS — Gestion de Stock</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="SODIMAS" />
+  <meta name="theme-color" content="#2D6BE4" />
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════ LOGIN ═══ -->
+<div id="login-screen" class="login-screen">
+  <div class="login-card">
+    <div class="login-logo">
+      <span class="logo-icon">▣</span>
+      <span class="logo-text">SODIMAS</span>
+    </div>
+    <p class="login-subtitle">Gestion de stock entrepôt</p>
+    <div class="form-group">
+      <label>Email</label>
+      <input type="email" id="login-email" placeholder="votre@email.com" autocomplete="email" />
+    </div>
+    <div class="form-group">
+      <label>Mot de passe</label>
+      <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" />
+    </div>
+    <div id="login-error" class="login-error hidden"></div>
+    <button class="btn-primary btn-full" id="login-btn" onclick="login()">Se connecter</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ APP ════ -->
+<div id="app" class="app hidden">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <span class="logo-icon">▣</span>
+      <span class="logo-text">SODIMAS</span>
+      <button class="sidebar-close" onclick="toggleSidebar()">✕</button>
+    </div>
+    <nav class="sidebar-nav">
+      <a class="nav-item active" data-page="dashboard" onclick="navigate('dashboard')">
+        <span class="nav-icon">◈</span> Tableau de bord
+      </a>
+      <a class="nav-item" data-page="stock" onclick="navigate('stock')">
+        <span class="nav-icon">▦</span> Stock actuel
+      </a>
+      <a class="nav-item" data-page="entree" onclick="navigate('entree')">
+        <span class="nav-icon">↓</span> Entrée de stock
+      </a>
+      <a class="nav-item" data-page="sortie" onclick="navigate('sortie')">
+        <span class="nav-icon">↑</span> Sortie de stock
+      </a>
+      <a class="nav-item" data-page="deplacement" onclick="navigate('deplacement')">
+        <span class="nav-icon">⇄</span> Déplacement
+      </a>
+      <a class="nav-item" data-page="historique" onclick="navigate('historique')">
+        <span class="nav-icon">◷</span> Historique
+      </a>
+      <a class="nav-item" data-page="zones" onclick="navigate('zones')">
+        <span class="nav-icon">⊞</span> Zones & Dépôts
+      </a>
+      <a class="nav-item" data-page="inventaire" onclick="navigate('inventaire')">
+        <span class="nav-icon">✓</span> Inventaire
+      </a>
+      <a class="nav-item" data-page="import-photo" onclick="navigate('import-photo')">
+        <span class="nav-icon">📷</span> Import photo
+      </a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-info">
+        <div class="user-avatar" id="user-avatar">B</div>
+        <div>
+          <div class="user-name" id="user-name">—</div>
+          <div class="user-role" id="user-role">—</div>
+        </div>
+      </div>
+      <button class="btn-logout" onclick="logout()">Déconnexion</button>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+    <header class="topbar">
+      <button class="hamburger" onclick="toggleSidebar()">☰</button>
+      <h1 class="page-title" id="page-title">Tableau de bord</h1>
+      <div class="topbar-right">
+        <span class="user-badge" id="topbar-user">—</span>
+      </div>
+    </header>
+
+    <!-- PAGES -->
+    <div class="page active" id="page-dashboard"></div>
+    <div class="page" id="page-stock"></div>
+    <div class="page" id="page-entree"></div>
+    <div class="page" id="page-sortie"></div>
+    <div class="page" id="page-deplacement"></div>
+    <div class="page" id="page-historique"></div>
+    <div class="page" id="page-zones"></div>
+    <div class="page" id="page-inventaire"></div>
+    <div class="page" id="page-import-photo"></div>
+  </main>
+</div>
+
+<!-- TOAST -->
+<div id="toast" class="toast hidden"></div>
+
+<!-- MODAL -->
+<div id="modal-overlay" class="modal-overlay hidden" onclick="closeModal()">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h3 id="modal-title"></h3>
+      <button onclick="closeModal()">✕</button>
+    </div>
+    <div id="modal-body" class="modal-body"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="app.js"></script>
+</body>
+</html>
