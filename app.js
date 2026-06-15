@@ -1552,9 +1552,13 @@ async function openBon(bonId) {
               <td>${badgeDepot(l.depot)}</td>
               <td>${fmt(l.rangee)}</td>
               <td class="td-qte">${l.quantite}</td>
-              <td>${!l.stockExiste || l.qteDispo < l.quantite
-                  ? `<span class="badge badge-sortie">⚠️ Indisponible</span>`
-                  : `<span class="badge badge-entree">OK</span>`}</td>
+              <td>${isEnCours
+                  ? (!l.stockExiste || l.qteDispo < l.quantite
+                      ? `<span class="badge badge-sortie">⚠️ Indisponible</span>`
+                      : `<span class="badge badge-entree">OK</span>`)
+                  : (l.indisponible
+                      ? `<span class="badge badge-sortie">⚠️ ${(l.quantite_preparee || 0) > 0 ? `Préparé ${l.quantite_preparee}/${l.quantite}` : 'Non préparé'}</span>`
+                      : `<span class="badge badge-entree">OK</span>`)}</td>
               ${isEnCours ? `<td><button class="btn-danger btn-sm" onclick="removeBonLigne('${l.id}','${bonId}')">✕</button></td>` : ''}
             </tr>
           `).join('') : `<tr><td colspan="${isEnCours ? 7 : 6}" style="text-align:center;color:var(--text-secondary)">Aucune ligne</td></tr>`}
@@ -1571,15 +1575,59 @@ async function openBon(bonId) {
 
       <div class="form-actions" style="margin-top:1.4rem">
         <button class="btn-success" onclick="validerBon('${bonId}')">✓ Valider le bon → générer BL</button>
+        <button class="btn-danger" onclick="deleteBon('${bonId}', false)">🗑 Supprimer le bon</button>
         <button class="btn-secondary" onclick="closeModal()">Fermer</button>
       </div>
     ` : `
       <div class="form-actions" style="margin-top:1.4rem">
         <button class="btn-primary" onclick="genererPDF('${bonId}')">📄 Télécharger le BL</button>
+        <button class="btn-danger" onclick="deleteBon('${bonId}', true)">🗑 Supprimer (annuler le BL)</button>
         <button class="btn-secondary" onclick="closeModal()">Fermer</button>
       </div>
     `}
   `);
+}
+
+async function deleteBon(bonId, wasValidated) {
+  if (!confirm(wasValidated
+    ? 'Supprimer ce bon va RESTAURER le stock déduit et annuler le bon de livraison. Continuer ?'
+    : 'Supprimer ce bon va libérer les réservations de stock. Continuer ?')) return;
+
+  const { data: lignes } = await sb.from('bon_lignes').select('*').eq('bon_id', bonId);
+
+  for (const l of lignes || []) {
+    if (l.stock_id) {
+      const { data: stockRow } = await sb.from('stock').select('quantite, quantite_reservee').eq('id', l.stock_id).single();
+      if (stockRow) {
+        if (wasValidated) {
+          // Restaurer la quantité déduite (elle n'est plus réservée car déjà validée)
+          await sb.from('stock').update({
+            quantite: stockRow.quantite + l.quantite,
+            updated_at: new Date().toISOString()
+          }).eq('id', l.stock_id);
+        } else {
+          // Juste libérer la réservation
+          await sb.from('stock').update({
+            quantite_reservee: Math.max(0, (stockRow.quantite_reservee || 0) - l.quantite)
+          }).eq('id', l.stock_id);
+        }
+      }
+    }
+  }
+
+  if (wasValidated) {
+    // Supprimer les mouvements liés à ce BL
+    const { data: bon } = await sb.from('bons_preparation').select('numero_bl').eq('id', bonId).single();
+    if (bon?.numero_bl) {
+      await sb.from('mouvements').delete().like('remarque', `${bon.numero_bl}%`);
+    }
+  }
+
+  await sb.from('bons_preparation').delete().eq('id', bonId);
+
+  toast(wasValidated ? 'Bon et BL supprimés, stock restauré.' : 'Bon supprimé, réservations libérées.');
+  closeModal();
+  renderBons();
 }
 
 let bonSearchDebounce = null;
@@ -1689,23 +1737,45 @@ async function validerBon(bonId) {
 
   // Pour chaque ligne : déduire le stock, libérer la réservation, créer le mouvement
   for (const l of lignes) {
+    let indisponible = false;
+    let qtePreparee = l.quantite;
+
     if (l.stock_id) {
       const { data: stockRow } = await sb.from('stock').select('quantite, quantite_reservee').eq('id', l.stock_id).single();
       if (stockRow) {
+        const dispoReel = stockRow.quantite; // ce qui est physiquement présent
+        qtePreparee = Math.min(l.quantite, Math.max(0, dispoReel));
+        indisponible = qtePreparee < l.quantite;
+
         await sb.from('stock').update({
-          quantite: Math.max(0, stockRow.quantite - l.quantite),
+          quantite: Math.max(0, stockRow.quantite - qtePreparee),
           quantite_reservee: Math.max(0, (stockRow.quantite_reservee || 0) - l.quantite),
           updated_at: new Date().toISOString()
         }).eq('id', l.stock_id);
+      } else {
+        indisponible = true;
+        qtePreparee = 0;
       }
+    } else {
+      // Ligne ajoutée manuellement sans stock_id → toujours indisponible
+      indisponible = true;
+      qtePreparee = 0;
     }
 
-    await sb.from('mouvements').insert({
-      date_mouvement: bon.date_prevue, type_mouvement: 'sortie',
-      reference: l.reference, lot: l.lot, depot: l.depot, rangee: l.rangee,
-      quantite: l.quantite, auteur, source: 'bon_preparation',
-      remarque: `${numeroBL} — ${bon.destinataire}`
-    });
+    // Mémoriser le résultat sur la ligne
+    await sb.from('bon_lignes').update({
+      indisponible, quantite_preparee: qtePreparee
+    }).eq('id', l.id);
+
+    // Mouvement de sortie uniquement pour la quantité réellement préparée
+    if (qtePreparee > 0) {
+      await sb.from('mouvements').insert({
+        date_mouvement: bon.date_prevue, type_mouvement: 'sortie',
+        reference: l.reference, lot: l.lot, depot: l.depot, rangee: l.rangee,
+        quantite: qtePreparee, auteur, source: 'bon_preparation',
+        remarque: `${numeroBL} — ${bon.destinataire}`
+      });
+    }
   }
 
   await sb.from('bons_preparation').update({
@@ -1747,28 +1817,69 @@ async function genererPDF(bonId) {
   doc.rect(14, y, 182, 8, 'F');
   doc.setFontSize(9);
   doc.text('Référence', 17, y + 5.5);
-  doc.text('Lot', 75, y + 5.5);
-  doc.text('Dépôt', 120, y + 5.5);
-  doc.text('Rangée', 145, y + 5.5);
-  doc.text('Quantité', 175, y + 5.5);
+  doc.text('Lot', 65, y + 5.5);
+  doc.text('Dépôt', 102, y + 5.5);
+  doc.text('Rangée', 122, y + 5.5);
+  doc.text('Qté dem.', 145, y + 5.5);
+  doc.text('Statut', 168, y + 5.5);
 
   doc.setTextColor(0);
   y += 8;
 
+  let hasIndispo = false;
+
   lignes?.forEach((l, i) => {
+    const indispo = l.indisponible;
+    if (indispo) hasIndispo = true;
+
     if (i % 2 === 1) {
       doc.setFillColor(245, 247, 250);
       doc.rect(14, y, 182, 7, 'F');
     }
+    if (indispo) {
+      doc.setFillColor(254, 226, 226);
+      doc.rect(14, y, 182, 7, 'F');
+    }
+
     doc.setFontSize(9);
+    doc.setTextColor(0);
     doc.text(String(l.reference || ''), 17, y + 5);
-    doc.text(String(l.lot || '—'), 75, y + 5);
-    doc.text(String(l.depot || '—'), 120, y + 5);
-    doc.text(String(l.rangee || '—'), 145, y + 5);
-    doc.text(String(l.quantite), 178, y + 5);
+    doc.text(String(l.lot || '—'), 65, y + 5);
+    doc.text(String(l.depot || '—'), 102, y + 5);
+    doc.text(String(l.rangee || '—'), 122, y + 5);
+    doc.text(String(l.quantite), 148, y + 5);
+
+    if (indispo) {
+      doc.setTextColor(200, 30, 30);
+      doc.setFontSize(8);
+      const qp = l.quantite_preparee || 0;
+      const label = qp > 0 ? `Préparé: ${qp}/${l.quantite}` : 'Non préparé';
+      doc.text(label, 168, y + 5);
+    } else {
+      doc.setTextColor(20, 130, 60);
+      doc.text('OK', 168, y + 5);
+    }
+
     y += 7;
     if (y > 270) { doc.addPage(); y = 20; }
   });
+
+  doc.setTextColor(0);
+
+  // Note explicative si des lignes sont indisponibles
+  if (hasIndispo) {
+    y += 8;
+    if (y > 260) { doc.addPage(); y = 20; }
+    doc.setFontSize(9);
+    doc.setTextColor(200, 30, 30);
+    doc.setFont('helvetica', 'bold');
+    doc.text('⚠ Certains articles n\'ont pas pu être préparés intégralement', 14, y);
+    doc.setFont('helvetica', 'normal');
+    y += 6;
+    doc.setFontSize(8.5);
+    doc.text('en raison d\'un stock insuffisant ou nul au moment de la préparation.', 14, y);
+    doc.setTextColor(0);
+  }
 
   // Pied de page
   y += 15;
