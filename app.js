@@ -1279,13 +1279,19 @@ async function analyseImportPhoto() {
 
   const prompt = `Tu analyses une feuille manuscrite de gestion de stock pour un entrepôt d'ascenseurs.
 
-RÉFÉRENCES — format exact à reconstituer :
+RÉFÉRENCES — format exact à reconstituer (toutes suivent le même schéma) :
 - "x35/530/67" → "35SO530E00067"
 - "y35/530/76" → "35SO530E00076"
 - "x36/570/09" → "36SO570E00009"
-- "x38/170/30" → "38170E00030" (PAS de "SO" ni "E" pour les références commençant par 38)
+- "x38/70/30" → "38SO070E00030" (même schéma : "38SO" + 3 chiffres + "E" + 5 chiffres, donc 70 devient 070)
 - Le préfixe x/y/v/etc devant n'est qu'une coche, ignore-le complètement
-- Le nombre après le 2e "/" est complété avec des zéros à gauche pour faire 5 chiffres (sauf pour 381xx)
+- Format général : [2 premiers chiffres]SO[3 chiffres]E[5 chiffres], avec zéros de remplissage à gauche
+
+NUMÉROS DE LOT — attention particulière :
+- Les chiffres "7" et "9" sont fréquemment confondus dans cette écriture manuscrite
+- Un "7" a une barre horizontale en haut et descend tout droit ou légèrement courbé
+- Un "9" a une boucle fermée en haut
+- Vérifie chaque chiffre 7/9 individuellement en comparant sa forme avec les autres occurrences du même chiffre sur la feuille
 
 QUANTITÉS — notation en bâtons, very important, lis attentivement :
 - "I" ou "l" ou "1" (un seul trait vertical) = 1
@@ -1299,7 +1305,7 @@ QUANTITÉS — notation en bâtons, very important, lis attentivement :
 ZONES :
 - "D2A6" = Dépôt "2" Rangée "6"
 - "RENO 8" = Dépôt "RENO" Rangée "8"
-- "RACK D2" = Dépôt "RACK" Rangée "2"
+- "RACK D2" = Dépôt "2" Rangée "RACK" (le numéro après D = le dépôt, RACK = la rangée)
 
 AUTRES RÈGLES :
 - Les x/coches devant une ligne = référence déjà préparée, ignore juste le symbole mais garde la ligne
@@ -1312,7 +1318,7 @@ Extrais TOUTES les lignes de la feuille et retourne UNIQUEMENT un JSON valide (s
   ...
 ]
 
-Si une valeur est illisible ou absente, mets null. Ne mets jamais de commentaires dans le JSON. Vérifie deux fois chaque quantité en bâtons avant de répondre.`;
+Si une valeur est illisible ou absente, mets null. Ne mets jamais de commentaires dans le JSON. Vérifie deux fois chaque quantité en bâtons et chaque chiffre 7/9 avant de répondre.`;
 
   try {
     const response = await fetch('/.netlify/functions/analyse', {
