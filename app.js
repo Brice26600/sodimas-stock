@@ -1279,13 +1279,32 @@ async function analyseImportPhoto() {
 
   const prompt = `Tu analyses une feuille manuscrite de gestion de stock pour un entrepôt d'ascenseurs.
 
-Contexte :
-- Les références ressemblent à : 35SO530E00067, 36SO570E00009, 38170E00030, etc.
-- Les numéros de lot ressemblent à : 4500224268, 4600128293, etc.
-- Les quantités sont parfois en notation bâton : I=1, II=2, III=3, □=4, □barré=5
-- Les zones de stockage : D2A6 = Dépôt 2 Rangée 6, RENO 3 = Dépôt RENO Rangée 3, RACK D2 = Dépôt RACK Rangée 2
-- Les x ou coches devant une ligne = référence préparée, à ignorer
-- Les guillemets " = même référence que la ligne précédente
+RÉFÉRENCES — format exact à reconstituer :
+- "x35/530/67" → "35SO530E00067"
+- "y35/530/76" → "35SO530E00076"
+- "x36/570/09" → "36SO570E00009"
+- "x38/170/30" → "38170E00030" (PAS de "SO" ni "E" pour les références commençant par 38)
+- Le préfixe x/y/v/etc devant n'est qu'une coche, ignore-le complètement
+- Le nombre après le 2e "/" est complété avec des zéros à gauche pour faire 5 chiffres (sauf pour 381xx)
+
+QUANTITÉS — notation en bâtons, very important, lis attentivement :
+- "I" ou "l" ou "1" (un seul trait vertical) = 1
+- "II" ou "11" (deux traits verticaux) = 2
+- "Γ" ou "r" ou "L" cursif (forme de crochet/équerre) = 2
+- "Π" ou "n" (forme de portique, deux traits + barre du haut) = 3
+- "□" (carré simple) = 4
+- "□ barré" ou "carré avec diagonale" = 5
+- Compte soigneusement le nombre de traits verticaux distincts pour chaque symbole
+
+ZONES :
+- "D2A6" = Dépôt "2" Rangée "6"
+- "RENO 8" = Dépôt "RENO" Rangée "8"
+- "RACK D2" = Dépôt "RACK" Rangée "2"
+
+AUTRES RÈGLES :
+- Les x/coches devant une ligne = référence déjà préparée, ignore juste le symbole mais garde la ligne
+- Le symbole " ou // sous une référence = même référence que la ligne du dessus
+- Une accolade } regroupant plusieurs lignes avec une seule zone à droite = cette zone s'applique à toutes les lignes regroupées
 
 Extrais TOUTES les lignes de la feuille et retourne UNIQUEMENT un JSON valide (sans markdown, sans texte autour) de ce format :
 [
@@ -1293,7 +1312,7 @@ Extrais TOUTES les lignes de la feuille et retourne UNIQUEMENT un JSON valide (s
   ...
 ]
 
-Si une valeur est illisible ou absente, mets null. Ne mets jamais de commentaires dans le JSON.`;
+Si une valeur est illisible ou absente, mets null. Ne mets jamais de commentaires dans le JSON. Vérifie deux fois chaque quantité en bâtons avant de répondre.`;
 
   try {
     const response = await fetch('/.netlify/functions/analyse', {
