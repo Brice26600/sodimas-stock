@@ -83,7 +83,7 @@ function navigate(page) {
     entree: 'Entrée de stock', sortie: 'Sortie de stock',
     deplacement: 'Déplacement', historique: 'Historique des mouvements',
     zones: 'Zones & Dépôts', inventaire: 'Inventaire',
-    'import-photo': 'Import par photo'
+    'import-photo': 'Import par photo', 'bons': 'Bons de préparation'
   };
   document.getElementById('page-title').textContent = titles[page] || page;
 
@@ -94,7 +94,7 @@ function navigate(page) {
     entree: renderEntree, sortie: renderSortie,
     deplacement: renderDeplacement, historique: renderHistorique,
     zones: renderZones, inventaire: renderInventaire,
-    'import-photo': renderImportPhoto
+    'import-photo': renderImportPhoto, 'bons': renderBons
   };
   renderers[page]?.();
 }
@@ -349,7 +349,7 @@ async function loadStockBatch() {
         <table>
           <thead><tr>
             <th>Référence</th><th>Lot</th><th>Dépôt</th><th>Rangée</th>
-            <th>Qté</th><th>Remarque</th><th></th>
+            <th>Qté</th><th>Dispo</th><th>Remarque</th><th></th>
           </tr></thead>
           <tbody id="stock-tbody"></tbody>
         </table>
@@ -361,6 +361,8 @@ async function loadStockBatch() {
   const cards = document.getElementById('stock-cards');
 
   data.forEach(r => {
+    const reserve = r.quantite_reservee || 0;
+    const dispo = r.quantite - reserve;
     // Ligne tableau
     if (tbody) {
       const tr = document.createElement('tr');
@@ -370,6 +372,7 @@ async function loadStockBatch() {
         <td>${badgeDepot(r.depot)}</td>
         <td>${fmt(r.rangee)}</td>
         <td class="td-qte">${r.quantite}</td>
+        <td class="td-qte" style="${reserve > 0 ? 'color:var(--warning)' : ''}">${dispo}${reserve > 0 ? ` <span style="font-size:.72rem;color:var(--text-secondary)">(${reserve} résa.)</span>` : ''}</td>
         <td style="max-width:180px;font-size:.8rem;color:var(--text-secondary)">${fmt(r.remarque)}</td>
         <td><button class="btn-secondary btn-sm btn-icon" title="Modifier" onclick='openArticle("${r.id}")'>✎</button></td>`;
       tbody.appendChild(tr);
@@ -387,6 +390,7 @@ async function loadStockBatch() {
           ${r.lot ? `<span class="stock-card-lot">Lot : ${r.lot}</span>` : ''}
           <span class="badge badge-depot">${r.depot || '—'}</span>
           ${r.rangee ? `<span class="stock-card-rangee">Rangée ${r.rangee}</span>` : ''}
+          ${reserve > 0 ? `<span style="font-size:.78rem;color:var(--warning)">Dispo: ${dispo} (${reserve} résa.)</span>` : ''}
         </div>
         ${r.photos?.length ? `<div style="margin:.4rem 0"><img src="${r.photos[0]}" style="width:48px;height:48px;object-fit:cover;border-radius:4px;opacity:.85" /></div>` : ''}
         ${r.remarque ? `<div class="stock-card-remarque">${r.remarque}</div>` : ''}
@@ -1439,4 +1443,339 @@ async function validateImport() {
   importRows = [];
   importPhotoData = null;
   renderImportPhoto();
+}
+
+// ═══════════════════════════════════════ BONS DE PRÉPARATION ════
+
+async function renderBons() {
+  const el = document.getElementById('page-bons');
+  el.innerHTML = spinner();
+
+  const { data: bons } = await sb.from('bons_preparation')
+    .select('*, bon_lignes(quantite)')
+    .order('created_at', { ascending: false });
+
+  el.innerHTML = `
+    <div class="card-header" style="margin-bottom:1rem">
+      <div></div>
+      <button class="btn-primary" onclick="openNewBonModal()">+ Nouveau bon</button>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title">Bons de préparation</div></div>
+      ${bons?.length ? `
+        <div class="table-wrapper">
+          <table>
+            <thead><tr><th>Date prévue</th><th>Destinataire</th><th>Lignes</th><th>Statut</th><th>N° BL</th><th></th></tr></thead>
+            <tbody>
+              ${bons.map(b => `
+                <tr>
+                  <td>${fmtDate(b.date_prevue)}</td>
+                  <td>${fmt(b.destinataire)}</td>
+                  <td class="td-qte">${b.bon_lignes?.length || 0}</td>
+                  <td><span class="badge ${b.statut === 'valide' ? 'badge-entree' : 'badge-deplacement'}">${b.statut === 'valide' ? 'Validé' : 'En cours'}</span></td>
+                  <td style="font-family:monospace;font-size:.82rem">${fmt(b.numero_bl)}</td>
+                  <td><button class="btn-secondary btn-sm" onclick="openBon('${b.id}')">Ouvrir</button></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : emptyState('Aucun bon de préparation.')}
+    </div>
+  `;
+}
+
+function openNewBonModal() {
+  openModal('Nouveau bon de préparation', `
+    <div class="form-group"><label>Date prévue *</label>
+      <input type="date" id="bon-date" value="${new Date().toISOString().slice(0,10)}" /></div>
+    <div class="form-group"><label>Destinataire *</label>
+      <input type="text" id="bon-dest" placeholder="ex: SODIMAS, Ludovic, Davy…" /></div>
+    <div class="form-group"><label>Remarque</label>
+      <textarea id="bon-remarque" placeholder="Informations complémentaires…"></textarea></div>
+    <div class="form-actions">
+      <button class="btn-primary" onclick="createBon()">Créer le bon</button>
+      <button class="btn-secondary" onclick="closeModal()">Annuler</button>
+    </div>
+  `);
+}
+
+async function createBon() {
+  const date = document.getElementById('bon-date').value;
+  const dest = document.getElementById('bon-dest').value.trim();
+  const remarque = document.getElementById('bon-remarque').value.trim();
+
+  if (!date || !dest) { toast('Date et destinataire obligatoires.', 'error'); return; }
+
+  const { data, error } = await sb.from('bons_preparation').insert({
+    date_prevue: date, destinataire: dest, remarque: remarque || null,
+    created_by: currentProfile?.prenom || currentUser?.email,
+    statut: 'en_cours'
+  }).select().single();
+
+  if (error) { toast('Erreur : ' + error.message, 'error'); return; }
+  toast('Bon créé.');
+  closeModal();
+  openBon(data.id);
+}
+
+async function openBon(bonId) {
+  const { data: bon } = await sb.from('bons_preparation').select('*').eq('id', bonId).single();
+  const { data: lignes } = await sb.from('bon_lignes').select('*').eq('bon_id', bonId).order('created_at');
+
+  // Vérifier la disponibilité pour chaque ligne
+  const lignesAvecDispo = await Promise.all((lignes || []).map(async l => {
+    const { data: stockRow } = await sb.from('stock').select('quantite, quantite_reservee')
+      .eq('reference', l.reference)
+      .maybeSingle();
+    const dispo = stockRow ? stockRow.quantite - (stockRow.quantite_reservee || 0) + l.quantite : -1;
+    return { ...l, stockExiste: !!stockRow, qteDispo: stockRow ? stockRow.quantite : 0 };
+  }));
+
+  const isEnCours = bon.statut === 'en_cours';
+
+  openModal(`Bon — ${fmtDate(bon.date_prevue)} → ${bon.destinataire}`, `
+    <div style="margin-bottom:1rem">
+      <span class="badge ${bon.statut === 'valide' ? 'badge-entree' : 'badge-deplacement'}">${bon.statut === 'valide' ? 'Validé' : 'En cours'}</span>
+      ${bon.numero_bl ? `<span style="margin-left:.6rem;font-family:monospace;font-size:.85rem;color:var(--text-secondary)">${bon.numero_bl}</span>` : ''}
+      ${bon.remarque ? `<p style="font-size:.85rem;color:var(--text-secondary);margin-top:.5rem">${bon.remarque}</p>` : ''}
+    </div>
+
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Référence</th><th>Lot</th><th>Dépôt</th><th>Rangée</th><th>Qté</th><th>Statut</th>${isEnCours ? '<th></th>' : ''}</tr></thead>
+        <tbody>
+          ${lignesAvecDispo.length ? lignesAvecDispo.map(l => `
+            <tr>
+              <td class="td-ref">${l.reference}</td>
+              <td class="td-lot">${fmt(l.lot)}</td>
+              <td>${badgeDepot(l.depot)}</td>
+              <td>${fmt(l.rangee)}</td>
+              <td class="td-qte">${l.quantite}</td>
+              <td>${!l.stockExiste || l.qteDispo < l.quantite
+                  ? `<span class="badge badge-sortie">⚠️ Indisponible</span>`
+                  : `<span class="badge badge-entree">OK</span>`}</td>
+              ${isEnCours ? `<td><button class="btn-danger btn-sm" onclick="removeBonLigne('${l.id}','${bonId}')">✕</button></td>` : ''}
+            </tr>
+          `).join('') : `<tr><td colspan="${isEnCours ? 7 : 6}" style="text-align:center;color:var(--text-secondary)">Aucune ligne</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+
+    ${isEnCours ? `
+      <div class="form-section-title">Ajouter une ligne</div>
+      <div class="search-bar">
+        <input type="text" id="bon-search" placeholder="Référence ou lot…" oninput="searchStockForBon('${bonId}')" />
+      </div>
+      <div id="bon-search-results"></div>
+
+      <div class="form-actions" style="margin-top:1.4rem">
+        <button class="btn-success" onclick="validerBon('${bonId}')">✓ Valider le bon → générer BL</button>
+        <button class="btn-secondary" onclick="closeModal()">Fermer</button>
+      </div>
+    ` : `
+      <div class="form-actions" style="margin-top:1.4rem">
+        <button class="btn-primary" onclick="genererPDF('${bonId}')">📄 Télécharger le BL</button>
+        <button class="btn-secondary" onclick="closeModal()">Fermer</button>
+      </div>
+    `}
+  `);
+}
+
+let bonSearchDebounce = null;
+async function searchStockForBon(bonId) {
+  const q = document.getElementById('bon-search').value.trim();
+  const res = document.getElementById('bon-search-results');
+  clearTimeout(bonSearchDebounce);
+  if (q.length < 2) { res.innerHTML = ''; return; }
+
+  bonSearchDebounce = setTimeout(async () => {
+    const { data } = await sb.from('stock').select('*')
+      .or(`reference.ilike.%${q}%,lot.ilike.%${q}%`)
+      .order('reference').limit(8);
+
+    if (!data?.length) {
+      res.innerHTML = `<p style="font-size:.85rem;color:var(--text-secondary);margin:.5rem 0">
+        Aucun article trouvé en stock. <button class="btn-secondary btn-sm" onclick="addBonLigneManuelle('${bonId}', '${q.replace(/'/g,"\\'")}')">Ajouter "${q}" quand même (indisponible)</button>
+      </p>`;
+      return;
+    }
+
+    res.innerHTML = `<div class="table-wrapper"><table>
+      <thead><tr><th>Référence</th><th>Lot</th><th>Dépôt</th><th>Dispo</th><th>Qté</th><th></th></tr></thead>
+      <tbody>${data.map((r, i) => `
+        <tr>
+          <td class="td-ref">${fmt(r.reference)}</td>
+          <td class="td-lot">${fmt(r.lot)}</td>
+          <td>${badgeDepot(r.depot)}</td>
+          <td class="td-qte">${(r.quantite - (r.quantite_reservee || 0)).toFixed(0)}</td>
+          <td><input type="number" id="bon-qte-${i}" value="1" min="1" style="width:55px;padding:.25rem .4rem;border:1.5px solid var(--border);border-radius:4px" /></td>
+          <td><button class="btn-primary btn-sm" onclick='addBonLigne("${bonId}", ${JSON.stringify(r).replace(/'/g,"&#39;")}, ${i})'>Ajouter</button></td>
+        </tr>
+      `).join('')}</tbody>
+    </table></div>`;
+  }, 300);
+}
+
+async function addBonLigne(bonId, stockRow, inputIndex) {
+  const qte = parseFloat(document.getElementById(`bon-qte-${inputIndex}`).value) || 1;
+
+  const { error } = await sb.from('bon_lignes').insert({
+    bon_id: bonId, stock_id: stockRow.id,
+    reference: stockRow.reference, lot: stockRow.lot,
+    depot: stockRow.depot, rangee: stockRow.rangee,
+    quantite: qte, added_by: currentProfile?.prenom || currentUser?.email
+  });
+  if (error) { toast('Erreur : ' + error.message, 'error'); return; }
+
+  // Réserver la quantité
+  await sb.from('stock').update({
+    quantite_reservee: (stockRow.quantite_reservee || 0) + qte
+  }).eq('id', stockRow.id);
+
+  toast(`${stockRow.reference} ajouté au bon.`);
+  document.getElementById('bon-search').value = '';
+  document.getElementById('bon-search-results').innerHTML = '';
+  openBon(bonId);
+}
+
+async function addBonLigneManuelle(bonId, ref) {
+  const { error } = await sb.from('bon_lignes').insert({
+    bon_id: bonId, reference: ref, quantite: 1,
+    added_by: currentProfile?.prenom || currentUser?.email
+  });
+  if (error) { toast('Erreur : ' + error.message, 'error'); return; }
+  toast(`${ref} ajouté (indisponible).`);
+  document.getElementById('bon-search').value = '';
+  document.getElementById('bon-search-results').innerHTML = '';
+  openBon(bonId);
+}
+
+async function removeBonLigne(ligneId, bonId) {
+  // Récupérer la ligne pour libérer la réservation
+  const { data: ligne } = await sb.from('bon_lignes').select('*').eq('id', ligneId).single();
+  if (ligne?.stock_id) {
+    const { data: stockRow } = await sb.from('stock').select('quantite_reservee').eq('id', ligne.stock_id).single();
+    if (stockRow) {
+      await sb.from('stock').update({
+        quantite_reservee: Math.max(0, (stockRow.quantite_reservee || 0) - ligne.quantite)
+      }).eq('id', ligne.stock_id);
+    }
+  }
+  await sb.from('bon_lignes').delete().eq('id', ligneId);
+  toast('Ligne supprimée.');
+  openBon(bonId);
+}
+
+async function validerBon(bonId) {
+  const { data: bon } = await sb.from('bons_preparation').select('*').eq('id', bonId).single();
+  const { data: lignes } = await sb.from('bon_lignes').select('*').eq('bon_id', bonId);
+
+  if (!lignes?.length) { toast('Le bon est vide.', 'error'); return; }
+
+  const auteur = currentProfile?.prenom || currentUser?.email;
+  const annee = new Date(bon.date_prevue).getFullYear();
+
+  // Générer le numéro de BL
+  const { data: compteur } = await sb.from('bl_compteur').select('*').eq('annee', annee).maybeSingle();
+  const nextNum = (compteur?.dernier_numero || 0) + 1;
+  const numeroBL = `BL-${annee}-${String(nextNum).padStart(4, '0')}`;
+
+  if (compteur) {
+    await sb.from('bl_compteur').update({ dernier_numero: nextNum }).eq('annee', annee);
+  } else {
+    await sb.from('bl_compteur').insert({ annee, dernier_numero: nextNum });
+  }
+
+  // Pour chaque ligne : déduire le stock, libérer la réservation, créer le mouvement
+  for (const l of lignes) {
+    if (l.stock_id) {
+      const { data: stockRow } = await sb.from('stock').select('quantite, quantite_reservee').eq('id', l.stock_id).single();
+      if (stockRow) {
+        await sb.from('stock').update({
+          quantite: Math.max(0, stockRow.quantite - l.quantite),
+          quantite_reservee: Math.max(0, (stockRow.quantite_reservee || 0) - l.quantite),
+          updated_at: new Date().toISOString()
+        }).eq('id', l.stock_id);
+      }
+    }
+
+    await sb.from('mouvements').insert({
+      date_mouvement: bon.date_prevue, type_mouvement: 'sortie',
+      reference: l.reference, lot: l.lot, depot: l.depot, rangee: l.rangee,
+      quantite: l.quantite, auteur, source: 'bon_preparation',
+      remarque: `${numeroBL} — ${bon.destinataire}`
+    });
+  }
+
+  await sb.from('bons_preparation').update({
+    statut: 'valide', numero_bl: numeroBL, validated_at: new Date().toISOString()
+  }).eq('id', bonId);
+
+  toast(`Bon validé ! ${numeroBL}`);
+  closeModal();
+  renderBons();
+}
+
+async function genererPDF(bonId) {
+  const { data: bon } = await sb.from('bons_preparation').select('*').eq('id', bonId).single();
+  const { data: lignes } = await sb.from('bon_lignes').select('*').eq('bon_id', bonId).order('created_at');
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+
+  // En-tête
+  doc.setFontSize(20);
+  doc.setFont('helvetica', 'bold');
+  doc.text('BON DE LIVRAISON', 14, 20);
+
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`N° ${bon.numero_bl}`, 14, 30);
+  doc.text(`Date : ${fmtDate(bon.date_prevue)}`, 14, 37);
+  doc.text(`Destinataire : ${bon.destinataire}`, 14, 44);
+
+  doc.setFontSize(9);
+  doc.setTextColor(120);
+  doc.text('SODIMAS — Gestion de stock entrepôt (Mozart Distribution)', 14, 54);
+  doc.setTextColor(0);
+
+  // Tableau
+  let y = 65;
+  doc.setFillColor(30, 35, 51);
+  doc.setTextColor(255);
+  doc.rect(14, y, 182, 8, 'F');
+  doc.setFontSize(9);
+  doc.text('Référence', 17, y + 5.5);
+  doc.text('Lot', 75, y + 5.5);
+  doc.text('Dépôt', 120, y + 5.5);
+  doc.text('Rangée', 145, y + 5.5);
+  doc.text('Quantité', 175, y + 5.5);
+
+  doc.setTextColor(0);
+  y += 8;
+
+  lignes?.forEach((l, i) => {
+    if (i % 2 === 1) {
+      doc.setFillColor(245, 247, 250);
+      doc.rect(14, y, 182, 7, 'F');
+    }
+    doc.setFontSize(9);
+    doc.text(String(l.reference || ''), 17, y + 5);
+    doc.text(String(l.lot || '—'), 75, y + 5);
+    doc.text(String(l.depot || '—'), 120, y + 5);
+    doc.text(String(l.rangee || '—'), 145, y + 5);
+    doc.text(String(l.quantite), 178, y + 5);
+    y += 7;
+    if (y > 270) { doc.addPage(); y = 20; }
+  });
+
+  // Pied de page
+  y += 15;
+  if (y > 250) { doc.addPage(); y = 20; }
+  doc.setFontSize(9);
+  doc.setTextColor(120);
+  doc.text(`Document généré le ${new Date().toLocaleDateString('fr-FR')} par ${bon.created_by || ''}`, 14, y);
+
+  doc.save(`${bon.numero_bl || 'bon'}_${bon.destinataire.replace(/\s+/g,'_')}.pdf`);
 }
