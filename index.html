@@ -60,6 +60,9 @@
       <a class="nav-item" data-page="sortie" onclick="navigate('sortie')">
         <span class="nav-icon">↑</span> Sortie de stock
       </a>
+      <a class="nav-item" data-page="bons" onclick="navigate('bons')">
+        <span class="nav-icon">📋</span> Bons de préparation
+      </a>
       <a class="nav-item" data-page="deplacement" onclick="navigate('deplacement')">
         <span class="nav-icon">⇄</span> Déplacement
       </a>
@@ -103,6 +106,7 @@
     <div class="page" id="page-stock"></div>
     <div class="page" id="page-entree"></div>
     <div class="page" id="page-sortie"></div>
+    <div class="page" id="page-bons"></div>
     <div class="page" id="page-deplacement"></div>
     <div class="page" id="page-historique"></div>
     <div class="page" id="page-zones"></div>
@@ -126,6 +130,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
