@@ -1094,7 +1094,13 @@ async function renderInventaire() {
                   <td>${fmt(inv.auteur)}</td>
                   <td><span class="badge ${inv.statut === 'termine' ? 'badge-entree' : 'badge-deplacement'}">${inv.statut}</span></td>
                   <td style="font-size:.85rem;color:var(--text-secondary)">${fmt(inv.remarque)}</td>
-                  <td><button class="btn-secondary btn-sm" onclick="viewInventaire('${inv.id}')">Voir</button></td>
+                  <td style="display:flex;gap:.4rem">
+                    <button class="btn-secondary btn-sm" onclick="viewInventaire('${inv.id}')">Voir</button>
+                    ${inv.statut === 'en_cours' ? `
+                      <button class="btn-secondary btn-sm" onclick="importPhotoInventaire('${inv.id}')">📷</button>
+                      <button class="btn-danger btn-sm" onclick="deleteInventaire('${inv.id}')">🗑</button>
+                    ` : ''}
+                  </td>
                 </tr>
               `).join('')}
             </tbody>
@@ -1181,6 +1187,184 @@ async function cloturerInventaire(invId) {
   renderInventaire();
 }
 
+async function deleteInventaire(invId) {
+  if (!confirm('Supprimer cet inventaire et toutes ses lignes ?')) return;
+  await sb.from('inventaire_lignes').delete().eq('inventaire_id', invId);
+  await sb.from('inventaires').delete().eq('id', invId);
+  toast('Inventaire supprimé.');
+  renderInventaire();
+}
+
+// Import photo depuis la page inventaire
+let invPhotoId = null;
+let invPhotoData = null;
+let invPhotoRows = [];
+
+function importPhotoInventaire(invId) {
+  invPhotoId = invId;
+  invPhotoRows = [];
+  invPhotoData = null;
+
+  openModal('Import photo — Inventaire', `
+    <p style="font-size:.85rem;color:var(--text-secondary);margin-bottom:1rem">
+      Prenez en photo la feuille d'inventaire. Les quantités comptées seront importées dans cet inventaire.
+    </p>
+    <div id="inv-drop-zone" class="ip-drop-zone" onclick="document.getElementById('inv-file').click()">
+      <div id="inv-preview-wrap">
+        <div class="ip-drop-icon">📷</div>
+        <p>Appuyez pour prendre une photo ou choisir depuis la galerie</p>
+      </div>
+      <input type="file" id="inv-file" accept="image/*" style="display:none" onchange="onInvPhotoSelected(this)" />
+    </div>
+    <div id="inv-analyse-wrap" class="hidden" style="margin-top:1rem">
+      <button class="btn-primary" id="inv-analyse-btn" onclick="analyseInvPhoto()">🔍 Analyser la photo</button>
+    </div>
+    <div id="inv-results-wrap" class="hidden" style="margin-top:1rem">
+      <div class="form-section-title">Vérification</div>
+      <div id="inv-cards"></div>
+      <div class="form-actions" style="margin-top:1rem">
+        <button class="btn-success" onclick="validateInvPhoto()">✓ Importer dans l'inventaire</button>
+      </div>
+    </div>
+  `);
+}
+
+async function onInvPhotoSelected(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    document.getElementById('inv-preview-wrap').innerHTML = `
+      <img src="${e.target.result}" style="max-width:100%;max-height:250px;border-radius:8px;object-fit:contain" />
+      <p style="font-size:.8rem;color:var(--text-secondary);margin-top:.4rem">Appuyez pour changer la photo</p>
+    `;
+  };
+  reader.readAsDataURL(file);
+  const compressed = await compressImage(file, 1600, 0.85);
+  const b64 = await new Promise(resolve => {
+    const r = new FileReader();
+    r.onload = e => resolve(e.target.result.split(',')[1]);
+    r.readAsDataURL(compressed);
+  });
+  invPhotoData = { base64: b64, mediaType: 'image/jpeg' };
+  document.getElementById('inv-analyse-wrap').classList.remove('hidden');
+}
+
+async function analyseInvPhoto() {
+  if (!invPhotoData) return;
+  const btn = document.getElementById('inv-analyse-btn');
+  btn.textContent = '⏳ Analyse en cours…';
+  btn.disabled = true;
+
+  const prompt = `Tu analyses une feuille manuscrite d'inventaire de stock pour un entrepôt d'ascenseurs.
+Même conventions que d'habitude :
+- Références : x35/530/67 → 35SO530E00067, x36/570/09 → 36SO570E00009, x38/70/30 → 38SO070E00030
+- Quantités en bâtons : I=1, II=2, Γ=2, Π=3, □=4, □barré=5
+- Zones : D2A6 = Dépôt "2" Rangée "6", RENO 3 = Dépôt "RENO" Rangée "3"
+- " = même référence que la ligne précédente
+
+Retourne UNIQUEMENT un JSON valide :
+[{"reference": "35SO530E00067", "lot": "4500224268", "quantite": 1, "depot": "2", "rangee": "6"}, ...]
+Si valeur absente, mets null.`;
+
+  try {
+    const response = await fetch('/.netlify/functions/analyse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 2000,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: invPhotoData.mediaType, data: invPhotoData.base64 } },
+            { type: 'text', text: prompt }
+          ]
+        }]
+      })
+    });
+    const data = await response.json();
+    if (data.error) throw new Error(JSON.stringify(data.error));
+    const text = data.content?.map(c => c.text || '').join('').trim();
+    const match = text.match(/\[[\s\S]*\]/);
+    if (!match) throw new Error('JSON introuvable');
+    invPhotoRows = JSON.parse(match[0]);
+
+    btn.textContent = '🔍 Analyser la photo';
+    btn.disabled = false;
+
+    // Afficher les cartes de vérification
+    const wrap = document.getElementById('inv-cards');
+    wrap.innerHTML = '';
+    invPhotoRows.forEach((row, i) => {
+      const div = document.createElement('div');
+      div.className = 'import-card';
+      div.innerHTML = `
+        <div class="import-card-header">
+          <span style="font-size:.78rem;color:var(--text-secondary);font-weight:600">Ligne ${i+1}</span>
+        </div>
+        <div class="form-group" style="margin-bottom:.6rem">
+          <label>Référence</label>
+          <input type="text" value="${row.reference || ''}" onchange="invPhotoRows[${i}].reference=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem;font-family:monospace" />
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="margin-bottom:.6rem">
+            <label>Lot</label>
+            <input type="text" value="${row.lot || ''}" onchange="invPhotoRows[${i}].lot=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.88rem;font-family:monospace" />
+          </div>
+          <div class="form-group" style="margin-bottom:.6rem">
+            <label>Qté réelle</label>
+            <input type="number" value="${row.quantite ?? 0}" min="0" onchange="invPhotoRows[${i}].quantite=parseFloat(this.value)" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="margin-bottom:0">
+            <label>Dépôt</label>
+            <input type="text" value="${row.depot || ''}" onchange="invPhotoRows[${i}].depot=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label>Rangée</label>
+            <input type="text" value="${row.rangee || ''}" onchange="invPhotoRows[${i}].rangee=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
+          </div>
+        </div>
+      `;
+      wrap.appendChild(div);
+    });
+    document.getElementById('inv-results-wrap').classList.remove('hidden');
+
+  } catch(e) {
+    toast('Erreur : ' + e.message, 'error');
+    btn.textContent = '🔍 Analyser la photo';
+    btn.disabled = false;
+  }
+}
+
+async function validateInvPhoto() {
+  if (!invPhotoRows.length || !invPhotoId) return;
+
+  const { data: stock } = await sb.from('stock').select('*');
+
+  for (const row of invPhotoRows) {
+    if (!row.reference) continue;
+    const stockRow = stock?.find(s => s.reference === row.reference);
+    const theorique = stockRow?.quantite ?? 0;
+
+    await sb.from('inventaire_lignes').upsert({
+      inventaire_id: invPhotoId,
+      reference: row.reference,
+      lot: row.lot || null,
+      depot: row.depot || null,
+      rangee: row.rangee || null,
+      quantite_theorique: theorique,
+      quantite_reelle: row.quantite ?? 0
+    }, { onConflict: 'inventaire_id,reference,depot' });
+  }
+
+  toast(`${invPhotoRows.length} ligne${invPhotoRows.length > 1 ? 's' : ''} importée${invPhotoRows.length > 1 ? 's' : ''} dans l'inventaire.`);
+  closeModal();
+  renderInventaire();
+}
+
 // ═══════════════════════════════════════ IMPORT PHOTO ════
 let importPhotoData = null; // { base64, type }
 let importRows = [];        // lignes extraites par Claude
@@ -1237,7 +1421,8 @@ function renderImportPhoto() {
         <p style="font-size:.82rem;color:var(--text-secondary);margin-bottom:.8rem">
           Vérifiez et corrigez si nécessaire avant de valider.
         </p>
-        <div class="table-wrapper">
+        <!-- Vue tableau (desktop) -->
+        <div class="table-wrapper stock-table-view">
           <table>
             <thead><tr>
               <th>Référence</th><th>Lot</th><th>Qté</th><th>Dépôt</th><th>Rangée</th><th></th>
@@ -1245,6 +1430,8 @@ function renderImportPhoto() {
             <tbody id="ip-tbody"></tbody>
           </table>
         </div>
+        <!-- Vue cartes (mobile/tablette) -->
+        <div class="stock-card-view" id="ip-cards"></div>
       </div>
     </div>
   `;
@@ -1379,6 +1566,52 @@ function renderImportTable() {
     `;
     tbody.appendChild(tr);
   });
+
+  // Vue cartes pour mobile
+  const cardsWrap = document.getElementById('ip-cards');
+  if (cardsWrap) {
+    cardsWrap.innerHTML = '';
+    importRows.forEach((row, i) => {
+      const div = document.createElement('div');
+      div.className = 'import-card';
+      div.innerHTML = `
+        <div class="import-card-header">
+          <span style="font-size:.78rem;color:var(--text-secondary);font-weight:600">Ligne ${i+1}</span>
+          <button class="btn-danger btn-sm" onclick="removeImportRow(${i})">✕</button>
+        </div>
+        <div class="form-group" style="margin-bottom:.6rem">
+          <label>Référence</label>
+          <input type="text" value="${row.reference || ''}" onchange="importRows[${i}].reference=this.value;syncImportTable()" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem;font-family:monospace" />
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="margin-bottom:.6rem">
+            <label>N° de lot</label>
+            <input type="text" value="${row.lot || ''}" onchange="importRows[${i}].lot=this.value;syncImportTable()" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.88rem;font-family:monospace" />
+          </div>
+          <div class="form-group" style="margin-bottom:.6rem">
+            <label>Quantité</label>
+            <input type="number" value="${row.quantite ?? 1}" min="1" onchange="importRows[${i}].quantite=parseFloat(this.value)" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="margin-bottom:0">
+            <label>Dépôt</label>
+            <input type="text" value="${row.depot || ''}" onchange="importRows[${i}].depot=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label>Rangée</label>
+            <input type="text" value="${row.rangee || ''}" onchange="importRows[${i}].rangee=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
+          </div>
+        </div>
+      `;
+      cardsWrap.appendChild(div);
+    });
+  }
+}
+
+function syncImportTable() {
+  // Re-render sans perdre le focus (juste sync les données)
+  renderImportTable();
 }
 
 function addImportRow() {
