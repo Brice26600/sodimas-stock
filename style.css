@@ -375,6 +375,17 @@ tr:hover td { background: #FAFBFC; }
 .ip-drop-icon { font-size: 2.5rem; margin-bottom: .5rem; }
 .ip-drop-zone p { font-size: .88rem; color: var(--text-secondary); }
 
+/* ═══════════════════════════════════════════ IMPORT CARDS ═══ */
+.import-card {
+  background: var(--bg); border-radius: var(--radius);
+  border: 1.5px solid var(--border); padding: .9rem;
+  margin-bottom: .75rem;
+}
+.import-card-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: .6rem;
+}
+
 /* ═══════════════════════════════════════════ RESPONSIVE ═══ */
 @media (max-width: 900px) {
   .card-grid-4 { grid-template-columns: repeat(2, 1fr); }
