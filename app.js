@@ -1182,7 +1182,60 @@ async function saveInventaireLigne(input) {
 async function cloturerInventaire(invId) {
   const { error } = await sb.from('inventaires').update({ statut: 'termine' }).eq('id', invId);
   if (error) { toast('Erreur.', 'error'); return; }
-  toast('Inventaire clôturé.');
+
+  // Récupérer toutes les lignes de l'inventaire
+  const { data: lignes } = await sb.from('inventaire_lignes')
+    .select('*').eq('inventaire_id', invId);
+
+  let crees = 0, mis_a_jour = 0;
+
+  for (const ligne of lignes || []) {
+    if (!ligne.reference || ligne.quantite_reelle === null) continue;
+
+    // Chercher si la référence existe déjà en stock
+    const { data: existing } = await sb.from('stock')
+      .select('id')
+      .eq('reference', ligne.reference)
+      .maybeSingle();
+
+    if (existing) {
+      // Mettre à jour la quantité
+      await sb.from('stock').update({
+        quantite: ligne.quantite_reelle,
+        depot: ligne.depot || undefined,
+        rangee: ligne.rangee || undefined,
+        updated_at: new Date().toISOString()
+      }).eq('id', existing.id);
+      mis_a_jour++;
+    } else {
+      // Créer la référence si elle n'existe pas
+      await sb.from('stock').insert({
+        reference: ligne.reference,
+        lot: ligne.lot || null,
+        depot: ligne.depot || null,
+        rangee: ligne.rangee || null,
+        quantite: ligne.quantite_reelle,
+        quantite_reservee: 0
+      });
+      crees++;
+    }
+
+    // Enregistrer le mouvement d'inventaire
+    await sb.from('mouvements').insert({
+      date_mouvement: new Date().toISOString().slice(0,10),
+      type_mouvement: 'inventaire',
+      reference: ligne.reference,
+      lot: ligne.lot || null,
+      depot: ligne.depot || null,
+      rangee: ligne.rangee || null,
+      quantite: ligne.quantite_reelle,
+      auteur: currentProfile?.prenom || currentUser?.email,
+      source: 'inventaire',
+      remarque: `Inventaire ${invId} — écart : ${(ligne.quantite_reelle - (ligne.quantite_theorique || 0))}`
+    });
+  }
+
+  toast(`Inventaire clôturé : ${mis_a_jour} article${mis_a_jour > 1 ? 's' : ''} mis à jour, ${crees} créé${crees > 1 ? 's' : ''}.`);
   closeModal();
   renderInventaire();
 }
