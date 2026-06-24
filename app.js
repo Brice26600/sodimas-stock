@@ -1153,7 +1153,10 @@ async function viewInventaire(invId) {
                     onchange="updateInvLigne('${l.id}', this)" />
                 ` : `<span class="td-qte">${l.quantite_reelle ?? 0}</span>`}</td>
                 <td class="td-qte" id="inv-ecart-${l.id}" style="color:${ecart < 0 ? 'var(--danger)' : ecart > 0 ? 'var(--success)' : 'var(--text-secondary)'}">${ecart > 0 ? '+'+ecart : ecart}</td>
-                ${isEnCours ? `<td><button class="btn-danger btn-sm" onclick="deleteInvLigne('${l.id}', '${invId}')">✕</button></td>` : ''}
+                ${isEnCours ? `<td style="display:flex;gap:.3rem">
+                  <button class="btn-secondary btn-sm" onclick="editInvLigne('${l.id}', '${invId}')">✎</button>
+                  <button class="btn-danger btn-sm" onclick="deleteInvLigne('${l.id}', '${invId}')">✕</button>
+                </td>` : ''}
               </tr>`;
             }).join('')}
           </tbody>
@@ -1174,6 +1177,56 @@ async function viewInventaire(invId) {
       </div>
     `}
   `);
+}
+
+async function editInvLigne(ligneId, invId) {
+  const { data: l } = await sb.from('inventaire_lignes').select('*').eq('id', ligneId).single();
+  if (!l) return;
+
+  openModal('Modifier la ligne', `
+    <div class="form-group"><label>Référence</label>
+      <input type="text" id="il-ref" value="${l.reference || ''}" style="font-family:monospace" /></div>
+    <div class="form-group"><label>N° de lot</label>
+      <input type="text" id="il-lot" value="${l.lot || ''}" style="font-family:monospace" /></div>
+    <div class="form-row">
+      <div class="form-group"><label>Dépôt</label>
+        <input type="text" id="il-depot" value="${l.depot || ''}" /></div>
+      <div class="form-group"><label>Rangée</label>
+        <input type="text" id="il-rangee" value="${l.rangee || ''}" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Qté théorique</label>
+        <input type="number" id="il-theorique" value="${l.quantite_theorique ?? 0}" min="0" /></div>
+      <div class="form-group"><label>Qté réelle *</label>
+        <input type="number" id="il-reelle" value="${l.quantite_reelle ?? 0}" min="0" /></div>
+    </div>
+    <div class="form-actions">
+      <button class="btn-primary" onclick="saveInvLigne('${ligneId}', '${invId}')">Enregistrer</button>
+      <button class="btn-danger" onclick="deleteInvLigne('${ligneId}', '${invId}')">Supprimer</button>
+      <button class="btn-secondary" onclick="viewInventaire('${invId}')">Annuler</button>
+    </div>
+  `);
+}
+
+async function saveInvLigne(ligneId, invId) {
+  const ref = document.getElementById('il-ref').value.trim();
+  const lot = document.getElementById('il-lot').value.trim();
+  const depot = document.getElementById('il-depot').value.trim();
+  const rangee = document.getElementById('il-rangee').value.trim();
+  const theorique = parseFloat(document.getElementById('il-theorique').value) || 0;
+  const reelle = parseFloat(document.getElementById('il-reelle').value) || 0;
+
+  if (!ref) { toast('La référence est obligatoire.', 'error'); return; }
+
+  const { error } = await sb.from('inventaire_lignes').update({
+    reference: ref, lot: lot || null,
+    depot: depot || null, rangee: rangee || null,
+    quantite_theorique: theorique, quantite_reelle: reelle
+  }).eq('id', ligneId);
+
+  if (error) { toast('Erreur : ' + error.message, 'error'); return; }
+  toast('Ligne modifiée.');
+  viewInventaire(invId);
 }
 
 async function updateInvLigne(ligneId, input) {
