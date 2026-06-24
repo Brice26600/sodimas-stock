@@ -237,7 +237,7 @@ let stockLoading = false;
 let stockAllLoaded = false;
 let stockTotal = 0;
 const STOCK_PER_PAGE = 40;
-let stockFilters = { q: '', depot: '' };
+let stockFilters = { q: '', depot: '', enStockSeulement: false };
 let stockScrollObserver = null;
 let stockSearchDebounce = null;
 
@@ -254,6 +254,10 @@ async function renderStock() {
         <select id="stock-depot" onchange="stockFilters.depot=this.value;resetStockScroll();loadStockBatch()">
           <option value="">Tous les dépôts</option>
         </select>
+        <label style="display:flex;align-items:center;gap:.4rem;font-size:.85rem;cursor:pointer;white-space:nowrap">
+          <input type="checkbox" id="stock-en-stock" ${stockFilters.enStockSeulement ? 'checked' : ''} onchange="stockFilters.enStockSeulement=this.checked;resetStockScroll();loadStockBatch()" />
+          En stock uniquement
+        </label>
         <button class="btn-secondary btn-sm" onclick="resetStockFilters()">Réinitialiser</button>
       </div>
       <div id="stock-count" style="font-size:.82rem;color:var(--text-secondary);margin-bottom:.6rem"></div>
@@ -323,6 +327,7 @@ async function loadStockBatch() {
   let query = sb.from('stock').select('*', { count: 'exact' });
   if (stockFilters.q) query = query.or(`reference.ilike.%${stockFilters.q}%,lot.ilike.%${stockFilters.q}%,designation.ilike.%${stockFilters.q}%`);
   if (stockFilters.depot) query = query.eq('depot', stockFilters.depot);
+  if (stockFilters.enStockSeulement) query = query.gt('quantite', 0);
   query = query.order('reference').range(stockOffset, stockOffset + STOCK_PER_PAGE - 1);
 
   const { data, count } = await query;
@@ -406,11 +411,13 @@ async function loadStockBatch() {
 }
 
 function resetStockFilters() {
-  stockFilters = { q: '', depot: '' };
+  stockFilters = { q: '', depot: '', enStockSeulement: false };
   const s = document.getElementById('stock-search');
   const d = document.getElementById('stock-depot');
+  const c = document.getElementById('stock-en-stock');
   if (s) s.value = '';
   if (d) d.value = '';
+  if (c) c.checked = false;
   resetStockScroll();
   loadStockBatch();
 }
@@ -1276,11 +1283,14 @@ async function cloturerInventaire(invId) {
   for (const ligne of lignes || []) {
     if (!ligne.reference || ligne.quantite_reelle === null) continue;
 
-    // Chercher si la référence existe déjà en stock
-    const { data: existing } = await sb.from('stock')
-      .select('id')
-      .eq('reference', ligne.reference)
-      .maybeSingle();
+    // Chercher si la référence + lot existe déjà en stock
+    let query = sb.from('stock').select('id').eq('reference', ligne.reference);
+    if (ligne.lot) {
+      query = query.eq('lot', ligne.lot);
+    } else {
+      query = query.is('lot', null);
+    }
+    const { data: existing } = await query.maybeSingle();
 
     if (existing) {
       // Mettre à jour la quantité
