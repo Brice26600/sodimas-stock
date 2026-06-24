@@ -624,12 +624,14 @@ async function saveEntree() {
   if (!depot) { toast('Le dépôt est obligatoire.', 'error'); return; }
   if (!qte || qte <= 0) { toast('La quantité doit être supérieure à 0.', 'error'); return; }
 
-  // Vérifier si la ligne existe déjà dans le stock (même ref + lot + depot + rangee)
-  const { data: existing } = await sb.from('stock')
-    .select('id, quantite')
-    .eq('reference', ref)
-    .eq('depot', depot)
-    .maybeSingle();
+  // Vérifier si la ligne existe déjà dans le stock (même ref + lot)
+  let stockQuery = sb.from('stock').select('id, quantite').eq('reference', ref);
+  if (lot) {
+    stockQuery = stockQuery.eq('lot', lot);
+  } else {
+    stockQuery = stockQuery.is('lot', null);
+  }
+  const { data: existing } = await stockQuery.eq('depot', depot).maybeSingle();
 
   let stockError;
   if (existing) {
