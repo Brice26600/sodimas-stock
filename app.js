@@ -456,6 +456,10 @@ async function openArticle(rowId) {
     </label>
 
     <div class="form-section-title" style="margin-top:1.2rem">Modifier</div>
+    <div class="form-group"><label>Référence</label>
+      <input type="text" id="edit-ref" value="${r.reference || ''}" style="font-family:monospace" /></div>
+    <div class="form-group"><label>N° de lot</label>
+      <input type="text" id="edit-lot" value="${r.lot || ''}" style="font-family:monospace" /></div>
     <div class="form-row">
       <div class="form-group"><label>Dépôt</label>
         <input type="text" id="edit-depot" value="${r.depot || ''}" /></div>
@@ -550,12 +554,18 @@ function editStock(row) {
 }
 
 async function saveEditStock(id) {
+  const ref = document.getElementById('edit-ref').value.trim();
+  const lot = document.getElementById('edit-lot').value.trim();
   const depot = document.getElementById('edit-depot').value.trim();
   const rangee = document.getElementById('edit-rangee').value.trim();
   const qte = parseFloat(document.getElementById('edit-qte').value);
   const remarque = document.getElementById('edit-remarque').value.trim();
 
+  if (!ref) { toast('La référence est obligatoire.', 'error'); return; }
+
   const { error } = await sb.from('stock').update({
+    reference: ref,
+    lot: lot || null,
     depot: depot || null, rangee: rangee || null,
     quantite: qte, remarque: remarque || null,
     updated_at: new Date().toISOString()
