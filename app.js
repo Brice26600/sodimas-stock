@@ -161,7 +161,7 @@ async function renderDashboard() {
     depots[d].articles++;
     depots[d].unites += r.quantite || 0;
   });
-  const maxArticles = Math.max(...Object.values(depots).map(d => d.articles), 1);
+  const maxUnites = Math.max(...Object.values(depots).map(d => d.unites), 1);
 
   // Mouvements récents
   const derniersMouv = mouvData?.slice(0, 5) || [];
@@ -204,7 +204,7 @@ async function renderDashboard() {
           <div class="depot-bar">
             <div class="depot-name">${name}</div>
             <div class="depot-track">
-              <div class="depot-fill" style="width:${Math.round(d.unites/Math.max(...Object.values(depots).map(x=>x.unites),1)*100)}%"></div>
+              <div class="depot-fill" style="width:${Math.round(d.unites/maxUnites*100)}%"></div>
             </div>
             <div class="depot-count">${d.unites} u.</div>
           </div>
@@ -1128,8 +1128,8 @@ async function startInventaire() {
   }).select().single();
 
   if (error) { toast('Erreur : ' + error.message, 'error'); return; }
-  toast('Nouvel inventaire créé.');
-  viewInventaire(data.id);
+  toast('Nouvel inventaire créé. Utilisez le bouton 📷 pour importer les photos.');
+  renderInventaire();
 }
 
 async function viewInventaire(invId) {
