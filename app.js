@@ -200,13 +200,13 @@ async function renderDashboard() {
         <div class="card-header">
           <div class="card-title">Répartition par dépôt</div>
         </div>
-        ${Object.entries(depots).sort((a,b) => b[1].articles - a[1].articles).map(([name, d]) => `
+        ${Object.entries(depots).sort((a,b) => b[1].unites - a[1].unites).map(([name, d]) => `
           <div class="depot-bar">
             <div class="depot-name">${name}</div>
             <div class="depot-track">
-              <div class="depot-fill" style="width:${Math.round(d.articles/maxArticles*100)}%"></div>
+              <div class="depot-fill" style="width:${Math.round(d.unites/Math.max(...Object.values(depots).map(x=>x.unites),1)*100)}%"></div>
             </div>
-            <div class="depot-count">${d.articles} réf.</div>
+            <div class="depot-count">${d.unites} u.</div>
           </div>
         `).join('') || emptyState('Aucune donnée')}
       </div>
@@ -1160,7 +1160,7 @@ async function viewInventaire(invId) {
           <table>
             <thead><tr>
               <th>Référence</th><th>Lot</th><th>Dépôt</th><th>Rangée</th>
-              <th>Théorique</th><th>Réel</th><th>Écart</th>
+              <th>Théorique</th><th>Réel</th><th>Écart</th><th>Remarque</th>
               ${isEnCours ? '<th></th>' : ''}
             </tr></thead>
             <tbody>
@@ -1174,6 +1174,7 @@ async function viewInventaire(invId) {
                   <td class="td-qte">${l.quantite_theorique ?? 0}</td>
                   <td>${isEnCours ? `<input type="number" min="0" value="${l.quantite_reelle ?? 0}" onchange="invLigneChanged('${l.id}','quantite_reelle',this.value)" style="width:65px;padding:.25rem .4rem;border:1.5px solid var(--border);border-radius:4px;font-size:.85rem" />` : `<span class="td-qte">${l.quantite_reelle ?? 0}</span>`}</td>
                   <td class="td-qte" id="inv-ecart-${l.id}" style="color:${ecart < 0 ? 'var(--danger)' : ecart > 0 ? 'var(--success)' : 'var(--text-secondary)'}">${ecart > 0 ? '+'+ecart : ecart}</td>
+                  <td>${isEnCours ? `<input type="text" value="${l.remarque || ''}" onchange="invLigneChanged('${l.id}','remarque',this.value)" style="width:100%;padding:.25rem .4rem;border:1.5px solid var(--border);border-radius:4px;font-size:.8rem" placeholder="remarque…" />` : `<span style="font-size:.8rem;color:var(--text-secondary)">${l.remarque || ''}</span>`}</td>
                   ${isEnCours ? `<td><button class="btn-danger btn-sm" onclick="deleteInvLigne('${l.id}','${invId}')">✕</button></td>` : ''}
                 </tr>`;
               }).join('')}
@@ -1300,6 +1301,7 @@ async function cloturerInventaire(invId) {
         quantite: ligne.quantite_reelle,
         depot: ligne.depot || undefined,
         rangee: ligne.rangee || undefined,
+        remarque: ligne.remarque || undefined,
         updated_at: new Date().toISOString()
       }).eq('id', existing.id);
       mis_a_jour++;
@@ -1310,6 +1312,7 @@ async function cloturerInventaire(invId) {
         lot: ligne.lot || null,
         depot: ligne.depot || null,
         rangee: ligne.rangee || null,
+        remarque: ligne.remarque || null,
         quantite: ligne.quantite_reelle,
         quantite_reservee: 0
       });
@@ -1348,6 +1351,7 @@ async function deleteInventaire(invId) {
 let invPhotoId = null;
 let invPhotoData = null;
 let invPhotoRows = [];
+let invPhotoRowsOriginal = []; // snapshot de ce que Claude a lu, avant corrections
 
 function importPhotoInventaire(invId) {
   invPhotoId = invId;
@@ -1406,6 +1410,9 @@ async function analyseInvPhoto() {
   btn.textContent = '⏳ Analyse en cours…';
   btn.disabled = true;
 
+  const corrections = await chargerCorrections();
+  const correctionsPrompt = buildCorrectionsPrompt(corrections);
+
   const prompt = `Tu analyses une feuille manuscrite d'inventaire de stock pour un entrepôt d'ascenseurs.
 Même conventions que d'habitude :
 - Références : x35/530/67 → 35SO530E00067, x36/570/09 → 36SO570E00009, x38/70/30 → 38SO070E00030
@@ -1414,8 +1421,8 @@ Même conventions que d'habitude :
 - " = même référence que la ligne précédente
 
 Retourne UNIQUEMENT un JSON valide :
-[{"reference": "35SO530E00067", "lot": "4500224268", "quantite": 1, "depot": "2", "rangee": "6"}, ...]
-Si valeur absente, mets null.`;
+[{"reference": "35SO530E00067", "lot": "4500224268", "quantite": 1, "depot": "2", "rangee": "6", "remarque": null}, ...]
+Si valeur absente, mets null. Le champ "remarque" contient toute note ou commentaire écrit dans la colonne remarque de la feuille.${correctionsPrompt}`;
 
   try {
     const response = await fetch('/.netlify/functions/analyse', {
@@ -1439,6 +1446,8 @@ Si valeur absente, mets null.`;
     const match = text.match(/\[[\s\S]*\]/);
     if (!match) throw new Error('JSON introuvable');
     invPhotoRows = JSON.parse(match[0]);
+    // Sauvegarder le snapshot original avant toute correction manuelle
+    invPhotoRowsOriginal = JSON.parse(JSON.stringify(invPhotoRows));
 
     btn.textContent = '🔍 Analyser la photo';
     btn.disabled = false;
@@ -1489,6 +1498,10 @@ function renderInvCards() {
           <input type="text" value="${row.rangee || ''}" onchange="invPhotoRows[${i}].rangee=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
         </div>
       </div>
+      <div class="form-group" style="margin-bottom:0;margin-top:.6rem">
+        <label>Remarque</label>
+        <input type="text" value="${row.remarque || ''}" onchange="invPhotoRows[${i}].remarque=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
+      </div>
     `;
     wrap.appendChild(div);
   });
@@ -1505,8 +1518,82 @@ function removeInvRow(i) {
   renderInvCards();
 }
 
+// ═══════════════════════════════════════ IA — CORRECTIONS ════
+
+async function enregistrerCorrections(rowsAvant, rowsApres) {
+  // Compare ce que Claude a lu (avant) vs ce que l'utilisateur a validé (après)
+  const champs = ['reference', 'lot', 'depot', 'rangee'];
+
+  for (let i = 0; i < Math.min(rowsAvant.length, rowsApres.length); i++) {
+    for (const champ of champs) {
+      const lu = (rowsAvant[i][champ] || '').toString().trim();
+      const corrige = (rowsApres[i][champ] || '').toString().trim();
+
+      if (lu && corrige && lu !== corrige) {
+        // Insérer ou incrémenter le compteur d'occurrences
+        const { data: existing } = await sb.from('corrections_ia')
+          .select('id, occurrences')
+          .eq('champ', champ)
+          .eq('valeur_lue', lu)
+          .maybeSingle();
+
+        if (existing) {
+          await sb.from('corrections_ia').update({
+            valeur_corrigee: corrige,
+            occurrences: existing.occurrences + 1,
+            updated_at: new Date().toISOString()
+          }).eq('id', existing.id);
+        } else {
+          await sb.from('corrections_ia').insert({
+            champ, valeur_lue: lu, valeur_corrigee: corrige
+          });
+        }
+      }
+    }
+  }
+}
+
+async function chargerCorrections() {
+  // Récupère les corrections les plus fréquentes (min 1 occurrence)
+  const { data } = await sb.from('corrections_ia')
+    .select('*')
+    .order('occurrences', { ascending: false })
+    .limit(50);
+  return data || [];
+}
+
+function buildCorrectionsPrompt(corrections) {
+  if (!corrections.length) return '';
+
+  const refs = corrections.filter(c => c.champ === 'reference');
+  const lots = corrections.filter(c => c.champ === 'lot');
+  const depots = corrections.filter(c => c.champ === 'depot');
+
+  let prompt = '\n\nCORRECTIONS APPRISES — applique-les systématiquement :\n';
+
+  if (refs.length) {
+    prompt += 'Références (lu → correct) :\n';
+    refs.forEach(c => prompt += `- "${c.valeur_lue}" → "${c.valeur_corrigee}" (${c.occurrences}x)\n`);
+  }
+  if (lots.length) {
+    prompt += 'Numéros de lot (lu → correct) :\n';
+    lots.forEach(c => prompt += `- "${c.valeur_lue}" → "${c.valeur_corrigee}" (${c.occurrences}x)\n`);
+  }
+  if (depots.length) {
+    prompt += 'Zones/Dépôts (lu → correct) :\n';
+    depots.forEach(c => prompt += `- "${c.valeur_lue}" → "${c.valeur_corrigee}" (${c.occurrences}x)\n`);
+  }
+
+  return prompt;
+}
+
 async function validateInvPhoto() {
   if (!invPhotoRows.length || !invPhotoId) return;
+
+  // Enregistrer les corrections (diff entre ce que Claude a lu et ce que l'utilisateur a validé)
+  if (invPhotoRowsOriginal.length) {
+    await enregistrerCorrections(invPhotoRowsOriginal, invPhotoRows);
+  }
 
   const { data: stock } = await sb.from('stock').select('*');
   let ok = 0, errors = 0;
@@ -1522,6 +1609,7 @@ async function validateInvPhoto() {
       lot: row.lot || null,
       depot: row.depot || null,
       rangee: row.rangee || null,
+      remarque: row.remarque || null,
       quantite_theorique: theorique,
       quantite_reelle: row.quantite ?? 0
     });
@@ -1540,9 +1628,10 @@ async function validateInvPhoto() {
 }
 
 // ═══════════════════════════════════════ IMPORT PHOTO ════
-let importPhotoData = null; // { base64, type }
-let importRows = [];        // lignes extraites par Claude
-let importType = 'sortie';  // 'entree' ou 'sortie'
+let importPhotoData = null;
+let importRows = [];
+let importRowsOriginal = [];
+let importType = 'sortie';
 let importDate = new Date().toISOString().slice(0, 10);
 
 function renderImportPhoto() {
@@ -1642,6 +1731,9 @@ async function analyseImportPhoto() {
   btn.textContent = '⏳ Analyse en cours…';
   btn.disabled = true;
 
+  const corrections = await chargerCorrections();
+  const correctionsPrompt = buildCorrectionsPrompt(corrections);
+
   const prompt = `Tu analyses une feuille manuscrite de gestion de stock pour un entrepôt d'ascenseurs.
 
 RÉFÉRENCES — format exact à reconstituer (toutes suivent le même schéma) :
@@ -1683,7 +1775,7 @@ Extrais TOUTES les lignes de la feuille et retourne UNIQUEMENT un JSON valide (s
   ...
 ]
 
-Si une valeur est illisible ou absente, mets null. Ne mets jamais de commentaires dans le JSON. Vérifie deux fois chaque quantité en bâtons et chaque chiffre 7/9 avant de répondre.`;
+Si une valeur est illisible ou absente, mets null. Ne mets jamais de commentaires dans le JSON. Vérifie deux fois chaque quantité en bâtons et chaque chiffre 7/9 avant de répondre.${correctionsPrompt}`;
 
   try {
     const response = await fetch('/.netlify/functions/analyse', {
@@ -1710,6 +1802,7 @@ Si une valeur est illisible ou absente, mets null. Ne mets jamais de commentaire
     const match = text.match(/\[[\s\S]*\]/);
     if (!match) throw new Error('JSON introuvable. Réponse : ' + text.slice(0, 200));
     importRows = JSON.parse(match[0]);
+    importRowsOriginal = JSON.parse(JSON.stringify(importRows));
 
     btn.textContent = '🔍 Analyser la photo';
     btn.disabled = false;
@@ -1800,6 +1893,11 @@ function removeImportRow(i) {
 
 async function validateImport() {
   if (!importRows.length) { toast('Aucune ligne à importer.', 'error'); return; }
+
+  // Enregistrer les corrections
+  if (importRowsOriginal.length) {
+    await enregistrerCorrections(importRowsOriginal, importRows);
+  }
 
   const type = document.getElementById('ip-type').value;
   const date = document.getElementById('ip-date').value;
