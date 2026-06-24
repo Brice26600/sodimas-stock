@@ -1137,7 +1137,7 @@ async function viewInventaire(invId) {
     ${lignes?.length ? `
       <div style="max-height:380px;overflow-y:auto">
         <table>
-          <thead><tr><th>Référence</th><th>Lot</th><th>Dépôt</th><th>Rangée</th><th>Théorique</th><th>Réel</th><th>Écart</th></tr></thead>
+          <thead><tr><th>Référence</th><th>Lot</th><th>Dépôt</th><th>Rangée</th><th>Théorique</th><th>Réel</th><th>Écart</th>${isEnCours ? '<th></th>' : ''}</tr></thead>
           <tbody>
             ${lignes.map(l => {
               const ecart = (l.quantite_reelle ?? 0) - (l.quantite_theorique ?? 0);
@@ -1147,8 +1147,13 @@ async function viewInventaire(invId) {
                 <td>${badgeDepot(l.depot)}</td>
                 <td>${fmt(l.rangee)}</td>
                 <td class="td-qte">${l.quantite_theorique ?? 0}</td>
-                <td class="td-qte">${l.quantite_reelle ?? 0}</td>
-                <td class="td-qte" style="color:${ecart < 0 ? 'var(--danger)' : ecart > 0 ? 'var(--success)' : 'var(--text-secondary)'}">${ecart > 0 ? '+'+ecart : ecart}</td>
+                <td>${isEnCours ? `
+                  <input type="number" min="0" value="${l.quantite_reelle ?? 0}"
+                    style="width:65px;padding:.25rem .4rem;border:1.5px solid var(--border);border-radius:4px;font-size:.85rem"
+                    onchange="updateInvLigne('${l.id}', this)" />
+                ` : `<span class="td-qte">${l.quantite_reelle ?? 0}</span>`}</td>
+                <td class="td-qte" id="inv-ecart-${l.id}" style="color:${ecart < 0 ? 'var(--danger)' : ecart > 0 ? 'var(--success)' : 'var(--text-secondary)'}">${ecart > 0 ? '+'+ecart : ecart}</td>
+                ${isEnCours ? `<td><button class="btn-danger btn-sm" onclick="deleteInvLigne('${l.id}', '${invId}')">✕</button></td>` : ''}
               </tr>`;
             }).join('')}
           </tbody>
@@ -1169,6 +1174,28 @@ async function viewInventaire(invId) {
       </div>
     `}
   `);
+}
+
+async function updateInvLigne(ligneId, input) {
+  const reel = parseFloat(input.value);
+  if (isNaN(reel)) return;
+
+  const { data: ligne } = await sb.from('inventaire_lignes').select('quantite_theorique').eq('id', ligneId).single();
+  await sb.from('inventaire_lignes').update({ quantite_reelle: reel }).eq('id', ligneId);
+
+  // Mettre à jour l'écart affiché
+  const ecart = reel - (ligne?.quantite_theorique ?? 0);
+  const ecartEl = document.getElementById('inv-ecart-' + ligneId);
+  if (ecartEl) {
+    ecartEl.textContent = ecart > 0 ? '+' + ecart : ecart;
+    ecartEl.style.color = ecart < 0 ? 'var(--danger)' : ecart > 0 ? 'var(--success)' : 'var(--text-secondary)';
+  }
+}
+
+async function deleteInvLigne(ligneId, invId) {
+  await sb.from('inventaire_lignes').delete().eq('id', ligneId);
+  toast('Ligne supprimée.');
+  viewInventaire(invId);
 }
 
 async function saveInventaireLigne(input) {
