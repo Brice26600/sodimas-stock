@@ -1119,44 +1119,55 @@ async function startInventaire() {
   }).select().single();
 
   if (error) { toast('Erreur : ' + error.message, 'error'); return; }
-  toast('Nouvel inventaire créé.');
-  viewInventaire(data.id);
+  toast('Nouvel inventaire créé. Utilisez le bouton 📷 pour importer les photos.');
+  renderInventaire();
 }
 
 async function viewInventaire(invId) {
   const { data: inv } = await sb.from('inventaires').select('*').eq('id', invId).single();
-  const { data: lignes } = await sb.from('inventaire_lignes').select('*').eq('inventaire_id', invId);
-  const { data: stock } = await sb.from('stock').select('*').order('reference');
+  const { data: lignes } = await sb.from('inventaire_lignes').select('*').eq('inventaire_id', invId).order('created_at');
+
+  const isEnCours = inv.statut === 'en_cours';
 
   openModal(`Inventaire du ${fmtDate(inv.date_inventaire)}`, `
     <p style="font-size:.85rem;color:var(--text-secondary);margin-bottom:1rem">
-      Statut : <strong>${inv.statut}</strong> | Par : ${inv.auteur || '—'}
+      Statut : <strong>${inv.statut}</strong> | Par : ${inv.auteur || '—'} | <strong>${lignes?.length || 0}</strong> ligne${(lignes?.length || 0) > 1 ? 's' : ''} saisie${(lignes?.length || 0) > 1 ? 's' : ''}
     </p>
-    <div class="form-section-title">Saisir les quantités réelles</div>
-    <div style="max-height:350px;overflow-y:auto">
-      <table>
-        <thead><tr><th>Référence</th><th>Dépôt</th><th>Théorique</th><th>Réel</th><th>Écart</th></tr></thead>
-        <tbody id="inv-tbody">
-          ${stock?.slice(0,30).map(r => {
-            const ligne = lignes?.find(l => l.reference === r.reference && l.depot === r.depot);
-            const reel = ligne?.quantite_reelle ?? '';
-            const ecart = ligne ? (ligne.quantite_reelle - r.quantite) : '';
-            return `<tr>
-              <td class="td-ref" style="font-size:.78rem">${r.reference}</td>
-              <td>${badgeDepot(r.depot)}</td>
-              <td class="td-qte">${r.quantite}</td>
-              <td><input type="number" min="0" value="${reel}" data-id="${r.id}" data-ref="${r.reference}" data-depot="${r.depot || ''}" data-theorique="${r.quantite}" data-inv="${invId}" style="width:70px;padding:.25rem .4rem;border:1.5px solid var(--border);border-radius:4px;font-size:.85rem" onchange="saveInventaireLigne(this)" /></td>
-              <td class="td-qte" id="ecart-${r.id}" style="color:${ecart < 0 ? 'var(--danger)' : ecart > 0 ? 'var(--success)' : 'var(--text-secondary)'}">${ecart !== '' ? (ecart > 0 ? '+'+ecart : ecart) : '—'}</td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>
-    </div>
-    ${inv.statut === 'en_cours' ? `
-      <div class="form-actions" style="margin-top:1rem">
-        <button class="btn-success" onclick="cloturerInventaire('${invId}')">✓ Clôturer l'inventaire</button>
+
+    ${lignes?.length ? `
+      <div style="max-height:380px;overflow-y:auto">
+        <table>
+          <thead><tr><th>Référence</th><th>Lot</th><th>Dépôt</th><th>Rangée</th><th>Théorique</th><th>Réel</th><th>Écart</th></tr></thead>
+          <tbody>
+            ${lignes.map(l => {
+              const ecart = (l.quantite_reelle ?? 0) - (l.quantite_theorique ?? 0);
+              return `<tr>
+                <td class="td-ref" style="font-size:.78rem">${l.reference}</td>
+                <td class="td-lot" style="font-size:.75rem">${fmt(l.lot)}</td>
+                <td>${badgeDepot(l.depot)}</td>
+                <td>${fmt(l.rangee)}</td>
+                <td class="td-qte">${l.quantite_theorique ?? 0}</td>
+                <td class="td-qte">${l.quantite_reelle ?? 0}</td>
+                <td class="td-qte" style="color:${ecart < 0 ? 'var(--danger)' : ecart > 0 ? 'var(--success)' : 'var(--text-secondary)'}">${ecart > 0 ? '+'+ecart : ecart}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
       </div>
-    ` : ''}
+    ` : `<p style="font-size:.88rem;color:var(--text-secondary);margin-bottom:1rem">
+      Aucune ligne saisie. Fermez cette fenêtre et utilisez le bouton 📷 pour importer les lignes par photo.
+    </p>`}
+
+    ${isEnCours ? `
+      <div class="form-actions" style="margin-top:1rem">
+        <button class="btn-success" onclick="cloturerInventaire('${invId}')" ${!lignes?.length ? 'disabled title="Importez d\'abord des lignes"' : ''}>✓ Clôturer et appliquer au stock</button>
+        <button class="btn-secondary" onclick="closeModal()">Fermer</button>
+      </div>
+    ` : `
+      <div class="form-actions" style="margin-top:1rem">
+        <button class="btn-secondary" onclick="closeModal()">Fermer</button>
+      </div>
+    `}
   `);
 }
 
@@ -1276,7 +1287,6 @@ function importPhotoInventaire(invId) {
       <div class="form-section-title">Vérification</div>
       <div id="inv-cards"></div>
       <div class="form-actions" style="margin-top:1rem">
-        <button class="btn-secondary" onclick="addInvRow()">+ Ligne</button>
         <button class="btn-success" onclick="validateInvPhoto()">✓ Importer dans l'inventaire</button>
       </div>
     </div>
@@ -1347,7 +1357,43 @@ Si valeur absente, mets null.`;
     btn.textContent = '🔍 Analyser la photo';
     btn.disabled = false;
 
-    renderInvCards();
+    // Afficher les cartes de vérification
+    const wrap = document.getElementById('inv-cards');
+    wrap.innerHTML = '';
+    invPhotoRows.forEach((row, i) => {
+      const div = document.createElement('div');
+      div.className = 'import-card';
+      div.innerHTML = `
+        <div class="import-card-header">
+          <span style="font-size:.78rem;color:var(--text-secondary);font-weight:600">Ligne ${i+1}</span>
+        </div>
+        <div class="form-group" style="margin-bottom:.6rem">
+          <label>Référence</label>
+          <input type="text" value="${row.reference || ''}" onchange="invPhotoRows[${i}].reference=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem;font-family:monospace" />
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="margin-bottom:.6rem">
+            <label>Lot</label>
+            <input type="text" value="${row.lot || ''}" onchange="invPhotoRows[${i}].lot=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.88rem;font-family:monospace" />
+          </div>
+          <div class="form-group" style="margin-bottom:.6rem">
+            <label>Qté réelle</label>
+            <input type="number" value="${row.quantite ?? 0}" min="0" onchange="invPhotoRows[${i}].quantite=parseFloat(this.value)" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="margin-bottom:0">
+            <label>Dépôt</label>
+            <input type="text" value="${row.depot || ''}" onchange="invPhotoRows[${i}].depot=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label>Rangée</label>
+            <input type="text" value="${row.rangee || ''}" onchange="invPhotoRows[${i}].rangee=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
+          </div>
+        </div>
+      `;
+      wrap.appendChild(div);
+    });
     document.getElementById('inv-results-wrap').classList.remove('hidden');
 
   } catch(e) {
@@ -1357,71 +1403,17 @@ Si valeur absente, mets null.`;
   }
 }
 
-function renderInvCards() {
-  const wrap = document.getElementById('inv-cards');
-  if (!wrap) return;
-  wrap.innerHTML = '';
-  invPhotoRows.forEach((row, i) => {
-    const div = document.createElement('div');
-    div.className = 'import-card';
-    div.innerHTML = `
-      <div class="import-card-header">
-        <span style="font-size:.78rem;color:var(--text-secondary);font-weight:600">Ligne ${i+1}</span>
-        <button class="btn-danger btn-sm" onclick="removeInvRow(${i})">✕</button>
-      </div>
-      <div class="form-group" style="margin-bottom:.6rem">
-        <label>Référence</label>
-        <input type="text" value="${row.reference || ''}" onchange="invPhotoRows[${i}].reference=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem;font-family:monospace" />
-      </div>
-      <div class="form-row">
-        <div class="form-group" style="margin-bottom:.6rem">
-          <label>Lot</label>
-          <input type="text" value="${row.lot || ''}" onchange="invPhotoRows[${i}].lot=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.88rem;font-family:monospace" />
-        </div>
-        <div class="form-group" style="margin-bottom:.6rem">
-          <label>Qté réelle</label>
-          <input type="number" value="${row.quantite ?? 0}" min="0" onchange="invPhotoRows[${i}].quantite=parseFloat(this.value)" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group" style="margin-bottom:0">
-          <label>Dépôt</label>
-          <input type="text" value="${row.depot || ''}" onchange="invPhotoRows[${i}].depot=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
-        </div>
-        <div class="form-group" style="margin-bottom:0">
-          <label>Rangée</label>
-          <input type="text" value="${row.rangee || ''}" onchange="invPhotoRows[${i}].rangee=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
-        </div>
-      </div>
-    `;
-    wrap.appendChild(div);
-  });
-}
-
-function addInvRow() {
-  invPhotoRows.push({ reference: '', lot: '', quantite: 0, depot: '', rangee: '' });
-  renderInvCards();
-  document.getElementById('inv-results-wrap').classList.remove('hidden');
-}
-
-function removeInvRow(i) {
-  invPhotoRows.splice(i, 1);
-  renderInvCards();
-}
-
 async function validateInvPhoto() {
   if (!invPhotoRows.length || !invPhotoId) return;
 
   const { data: stock } = await sb.from('stock').select('*');
-  let ok = 0;
-  let errors = 0;
 
   for (const row of invPhotoRows) {
     if (!row.reference) continue;
     const stockRow = stock?.find(s => s.reference === row.reference);
     const theorique = stockRow?.quantite ?? 0;
 
-    const { error } = await sb.from('inventaire_lignes').insert({
+    await sb.from('inventaire_lignes').upsert({
       inventaire_id: invPhotoId,
       reference: row.reference,
       lot: row.lot || null,
@@ -1429,17 +1421,10 @@ async function validateInvPhoto() {
       rangee: row.rangee || null,
       quantite_theorique: theorique,
       quantite_reelle: row.quantite ?? 0
-    });
-
-    if (error) errors++;
-    else ok++;
+    }, { onConflict: 'inventaire_id,reference,depot' });
   }
 
-  if (errors > 0) {
-    toast(`${ok} ligne${ok > 1 ? 's' : ''} importée${ok > 1 ? 's' : ''}, ${errors} erreur${errors > 1 ? 's' : ''}.`, 'error');
-  } else {
-    toast(`${ok} ligne${ok > 1 ? 's' : ''} importée${ok > 1 ? 's' : ''} dans l'inventaire.`);
-  }
+  toast(`${invPhotoRows.length} ligne${invPhotoRows.length > 1 ? 's' : ''} importée${invPhotoRows.length > 1 ? 's' : ''} dans l'inventaire.`);
   closeModal();
   renderInventaire();
 }
