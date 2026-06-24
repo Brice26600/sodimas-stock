@@ -1276,6 +1276,7 @@ function importPhotoInventaire(invId) {
       <div class="form-section-title">Vérification</div>
       <div id="inv-cards"></div>
       <div class="form-actions" style="margin-top:1rem">
+        <button class="btn-secondary" onclick="addInvRow()">+ Ligne</button>
         <button class="btn-success" onclick="validateInvPhoto()">✓ Importer dans l'inventaire</button>
       </div>
     </div>
@@ -1346,43 +1347,7 @@ Si valeur absente, mets null.`;
     btn.textContent = '🔍 Analyser la photo';
     btn.disabled = false;
 
-    // Afficher les cartes de vérification
-    const wrap = document.getElementById('inv-cards');
-    wrap.innerHTML = '';
-    invPhotoRows.forEach((row, i) => {
-      const div = document.createElement('div');
-      div.className = 'import-card';
-      div.innerHTML = `
-        <div class="import-card-header">
-          <span style="font-size:.78rem;color:var(--text-secondary);font-weight:600">Ligne ${i+1}</span>
-        </div>
-        <div class="form-group" style="margin-bottom:.6rem">
-          <label>Référence</label>
-          <input type="text" value="${row.reference || ''}" onchange="invPhotoRows[${i}].reference=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem;font-family:monospace" />
-        </div>
-        <div class="form-row">
-          <div class="form-group" style="margin-bottom:.6rem">
-            <label>Lot</label>
-            <input type="text" value="${row.lot || ''}" onchange="invPhotoRows[${i}].lot=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.88rem;font-family:monospace" />
-          </div>
-          <div class="form-group" style="margin-bottom:.6rem">
-            <label>Qté réelle</label>
-            <input type="number" value="${row.quantite ?? 0}" min="0" onchange="invPhotoRows[${i}].quantite=parseFloat(this.value)" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group" style="margin-bottom:0">
-            <label>Dépôt</label>
-            <input type="text" value="${row.depot || ''}" onchange="invPhotoRows[${i}].depot=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
-          </div>
-          <div class="form-group" style="margin-bottom:0">
-            <label>Rangée</label>
-            <input type="text" value="${row.rangee || ''}" onchange="invPhotoRows[${i}].rangee=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
-          </div>
-        </div>
-      `;
-      wrap.appendChild(div);
-    });
+    renderInvCards();
     document.getElementById('inv-results-wrap').classList.remove('hidden');
 
   } catch(e) {
@@ -1392,17 +1357,71 @@ Si valeur absente, mets null.`;
   }
 }
 
+function renderInvCards() {
+  const wrap = document.getElementById('inv-cards');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  invPhotoRows.forEach((row, i) => {
+    const div = document.createElement('div');
+    div.className = 'import-card';
+    div.innerHTML = `
+      <div class="import-card-header">
+        <span style="font-size:.78rem;color:var(--text-secondary);font-weight:600">Ligne ${i+1}</span>
+        <button class="btn-danger btn-sm" onclick="removeInvRow(${i})">✕</button>
+      </div>
+      <div class="form-group" style="margin-bottom:.6rem">
+        <label>Référence</label>
+        <input type="text" value="${row.reference || ''}" onchange="invPhotoRows[${i}].reference=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem;font-family:monospace" />
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="margin-bottom:.6rem">
+          <label>Lot</label>
+          <input type="text" value="${row.lot || ''}" onchange="invPhotoRows[${i}].lot=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.88rem;font-family:monospace" />
+        </div>
+        <div class="form-group" style="margin-bottom:.6rem">
+          <label>Qté réelle</label>
+          <input type="number" value="${row.quantite ?? 0}" min="0" onchange="invPhotoRows[${i}].quantite=parseFloat(this.value)" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="margin-bottom:0">
+          <label>Dépôt</label>
+          <input type="text" value="${row.depot || ''}" onchange="invPhotoRows[${i}].depot=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label>Rangée</label>
+          <input type="text" value="${row.rangee || ''}" onchange="invPhotoRows[${i}].rangee=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
+        </div>
+      </div>
+    `;
+    wrap.appendChild(div);
+  });
+}
+
+function addInvRow() {
+  invPhotoRows.push({ reference: '', lot: '', quantite: 0, depot: '', rangee: '' });
+  renderInvCards();
+  document.getElementById('inv-results-wrap').classList.remove('hidden');
+}
+
+function removeInvRow(i) {
+  invPhotoRows.splice(i, 1);
+  renderInvCards();
+}
+
 async function validateInvPhoto() {
   if (!invPhotoRows.length || !invPhotoId) return;
 
   const { data: stock } = await sb.from('stock').select('*');
+  let ok = 0;
+  let errors = 0;
 
   for (const row of invPhotoRows) {
     if (!row.reference) continue;
     const stockRow = stock?.find(s => s.reference === row.reference);
     const theorique = stockRow?.quantite ?? 0;
 
-    await sb.from('inventaire_lignes').upsert({
+    const { error } = await sb.from('inventaire_lignes').insert({
       inventaire_id: invPhotoId,
       reference: row.reference,
       lot: row.lot || null,
@@ -1410,10 +1429,17 @@ async function validateInvPhoto() {
       rangee: row.rangee || null,
       quantite_theorique: theorique,
       quantite_reelle: row.quantite ?? 0
-    }, { onConflict: 'inventaire_id,reference,depot' });
+    });
+
+    if (error) errors++;
+    else ok++;
   }
 
-  toast(`${invPhotoRows.length} ligne${invPhotoRows.length > 1 ? 's' : ''} importée${invPhotoRows.length > 1 ? 's' : ''} dans l'inventaire.`);
+  if (errors > 0) {
+    toast(`${ok} ligne${ok > 1 ? 's' : ''} importée${ok > 1 ? 's' : ''}, ${errors} erreur${errors > 1 ? 's' : ''}.`, 'error');
+  } else {
+    toast(`${ok} ligne${ok > 1 ? 's' : ''} importée${ok > 1 ? 's' : ''} dans l'inventaire.`);
+  }
   closeModal();
   renderInventaire();
 }
