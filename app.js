@@ -1128,55 +1128,92 @@ async function viewInventaire(invId) {
   const { data: lignes } = await sb.from('inventaire_lignes').select('*').eq('inventaire_id', invId).order('created_at');
 
   const isEnCours = inv.statut === 'en_cours';
+  const el = document.getElementById('page-inventaire');
 
-  openModal(`Inventaire du ${fmtDate(inv.date_inventaire)}`, `
-    <p style="font-size:.85rem;color:var(--text-secondary);margin-bottom:1rem">
-      Statut : <strong>${inv.statut}</strong> | Par : ${inv.auteur || '—'} | <strong>${lignes?.length || 0}</strong> ligne${(lignes?.length || 0) > 1 ? 's' : ''} saisie${(lignes?.length || 0) > 1 ? 's' : ''}
-    </p>
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;gap:.8rem;margin-bottom:1rem;flex-wrap:wrap">
+      <button class="btn-secondary btn-sm" onclick="renderInventaire()">← Retour</button>
+      <h2 style="font-size:1rem;font-weight:600;flex:1">
+        Inventaire du ${fmtDate(inv.date_inventaire)} — ${inv.auteur || '—'}
+        <span class="badge ${inv.statut === 'termine' ? 'badge-entree' : 'badge-deplacement'}" style="margin-left:.5rem">${inv.statut === 'termine' ? 'Terminé' : 'En cours'}</span>
+      </h2>
+      ${isEnCours ? `
+        <button class="btn-secondary btn-sm" onclick="importPhotoInventaire('${invId}')">📷 Ajouter photo</button>
+        <button class="btn-secondary btn-sm" onclick="ajouterLigneInv('${invId}')">+ Ligne</button>
+        <button class="btn-success" onclick="cloturerInventaire('${invId}')" ${!lignes?.length ? 'disabled' : ''}>✓ Clôturer</button>
+      ` : ''}
+    </div>
 
-    ${lignes?.length ? `
-      <div style="max-height:380px;overflow-y:auto">
-        <table>
-          <thead><tr><th>Référence</th><th>Lot</th><th>Dépôt</th><th>Rangée</th><th>Théorique</th><th>Réel</th><th>Écart</th>${isEnCours ? '<th></th>' : ''}</tr></thead>
-          <tbody>
+    <div class="card">
+      <div id="inv-lignes-wrap">
+        ${lignes?.length ? `
+          <!-- Vue tableau desktop -->
+          <div class="table-wrapper stock-table-view">
+            <table>
+              <thead><tr>
+                <th>Référence</th><th>Lot</th><th>Dépôt</th><th>Rangée</th>
+                <th>Théorique</th><th>Réel</th><th>Écart</th>
+                ${isEnCours ? '<th></th>' : ''}
+              </tr></thead>
+              <tbody>
+                ${lignes.map(l => {
+                  const ecart = (l.quantite_reelle ?? 0) - (l.quantite_theorique ?? 0);
+                  return `<tr id="inv-row-${l.id}">
+                    <td>${isEnCours ? `<input type="text" value="${l.reference || ''}" onchange="invLigneChanged('${l.id}','reference',this.value)" style="width:100%;padding:.25rem .4rem;border:1.5px solid var(--border);border-radius:4px;font-size:.8rem;font-family:monospace" />` : `<span class="td-ref" style="font-size:.78rem">${l.reference}</span>`}</td>
+                    <td>${isEnCours ? `<input type="text" value="${l.lot || ''}" onchange="invLigneChanged('${l.id}','lot',this.value)" style="width:100%;padding:.25rem .4rem;border:1.5px solid var(--border);border-radius:4px;font-size:.78rem;font-family:monospace" />` : `<span class="td-lot">${fmt(l.lot)}</span>`}</td>
+                    <td>${isEnCours ? `<input type="text" value="${l.depot || ''}" onchange="invLigneChanged('${l.id}','depot',this.value)" style="width:70px;padding:.25rem .4rem;border:1.5px solid var(--border);border-radius:4px;font-size:.82rem" />` : badgeDepot(l.depot)}</td>
+                    <td>${isEnCours ? `<input type="text" value="${l.rangee || ''}" onchange="invLigneChanged('${l.id}','rangee',this.value)" style="width:65px;padding:.25rem .4rem;border:1.5px solid var(--border);border-radius:4px;font-size:.82rem" />` : `${fmt(l.rangee)}`}</td>
+                    <td class="td-qte">${l.quantite_theorique ?? 0}</td>
+                    <td>${isEnCours ? `<input type="number" min="0" value="${l.quantite_reelle ?? 0}" onchange="invLigneChanged('${l.id}','quantite_reelle',this.value)" style="width:65px;padding:.25rem .4rem;border:1.5px solid var(--border);border-radius:4px;font-size:.85rem" />` : `<span class="td-qte">${l.quantite_reelle ?? 0}</span>`}</td>
+                    <td class="td-qte" id="inv-ecart-${l.id}" style="color:${ecart < 0 ? 'var(--danger)' : ecart > 0 ? 'var(--success)' : 'var(--text-secondary)'}">${ecart > 0 ? '+'+ecart : ecart}</td>
+                    ${isEnCours ? `<td><button class="btn-danger btn-sm" onclick="deleteInvLigne('${l.id}','${invId}')">✕</button></td>` : ''}
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Vue cartes mobile/tablette -->
+          <div class="stock-card-view">
             ${lignes.map(l => {
               const ecart = (l.quantite_reelle ?? 0) - (l.quantite_theorique ?? 0);
-              return `<tr>
-                <td class="td-ref" style="font-size:.78rem">${l.reference}</td>
-                <td class="td-lot" style="font-size:.75rem">${fmt(l.lot)}</td>
-                <td>${badgeDepot(l.depot)}</td>
-                <td>${fmt(l.rangee)}</td>
-                <td class="td-qte">${l.quantite_theorique ?? 0}</td>
-                <td>${isEnCours ? `
-                  <input type="number" min="0" value="${l.quantite_reelle ?? 0}"
-                    style="width:65px;padding:.25rem .4rem;border:1.5px solid var(--border);border-radius:4px;font-size:.85rem"
-                    onchange="updateInvLigne('${l.id}', this)" />
-                ` : `<span class="td-qte">${l.quantite_reelle ?? 0}</span>`}</td>
-                <td class="td-qte" id="inv-ecart-${l.id}" style="color:${ecart < 0 ? 'var(--danger)' : ecart > 0 ? 'var(--success)' : 'var(--text-secondary)'}">${ecart > 0 ? '+'+ecart : ecart}</td>
-                ${isEnCours ? `<td style="display:flex;gap:.3rem">
-                  <button class="btn-secondary btn-sm" onclick="editInvLigne('${l.id}', '${invId}')">✎</button>
-                  <button class="btn-danger btn-sm" onclick="deleteInvLigne('${l.id}', '${invId}')">✕</button>
-                </td>` : ''}
-              </tr>`;
+              return `<div class="import-card">
+                <div class="import-card-header">
+                  <span style="font-size:.78rem;color:var(--text-secondary);font-weight:600">${l.reference || '—'}</span>
+                  ${isEnCours ? `<button class="btn-danger btn-sm" onclick="deleteInvLigne('${l.id}','${invId}')">✕</button>` : ''}
+                </div>
+                ${isEnCours ? `
+                  <div class="form-group" style="margin-bottom:.5rem"><label>Référence</label>
+                    <input type="text" value="${l.reference || ''}" onchange="invLigneChanged('${l.id}','reference',this.value)" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem;font-family:monospace" /></div>
+                  <div class="form-row">
+                    <div class="form-group" style="margin-bottom:.5rem"><label>Lot</label>
+                      <input type="text" value="${l.lot || ''}" onchange="invLigneChanged('${l.id}','lot',this.value)" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.88rem;font-family:monospace" /></div>
+                    <div class="form-group" style="margin-bottom:.5rem"><label>Qté réelle</label>
+                      <input type="number" min="0" value="${l.quantite_reelle ?? 0}" onchange="invLigneChanged('${l.id}','quantite_reelle',this.value)" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" /></div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group" style="margin-bottom:0"><label>Dépôt</label>
+                      <input type="text" value="${l.depot || ''}" onchange="invLigneChanged('${l.id}','depot',this.value)" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" /></div>
+                    <div class="form-group" style="margin-bottom:0"><label>Rangée</label>
+                      <input type="text" value="${l.rangee || ''}" onchange="invLigneChanged('${l.id}','rangee',this.value)" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" /></div>
+                  </div>
+                ` : `
+                  <div style="font-size:.85rem;color:var(--text-secondary)">Lot : ${fmt(l.lot)} | ${l.depot || '—'} / ${l.rangee || '—'}</div>
+                `}
+                <div style="margin-top:.5rem;font-size:.85rem">
+                  Théorique : <strong>${l.quantite_theorique ?? 0}</strong> →
+                  Réel : <strong>${l.quantite_reelle ?? 0}</strong> →
+                  Écart : <strong style="color:${ecart < 0 ? 'var(--danger)' : ecart > 0 ? 'var(--success)' : 'var(--text-secondary)'}">${ecart > 0 ? '+'+ecart : ecart}</strong>
+                </div>
+              </div>`;
             }).join('')}
-          </tbody>
-        </table>
+          </div>
+        ` : `<div style="text-align:center;padding:2rem;color:var(--text-secondary)">
+          Aucune ligne saisie. Utilisez le bouton 📷 pour importer les lignes par photo.
+        </div>`}
       </div>
-    ` : `<p style="font-size:.88rem;color:var(--text-secondary);margin-bottom:1rem">
-      Aucune ligne saisie. Fermez cette fenêtre et utilisez le bouton 📷 pour importer les lignes par photo.
-    </p>`}
-
-    ${isEnCours ? `
-      <div class="form-actions" style="margin-top:1rem">
-        <button class="btn-success" onclick="cloturerInventaire('${invId}')" ${!lignes?.length ? 'disabled title="Importez d\'abord des lignes"' : ''}>✓ Clôturer et appliquer au stock</button>
-        <button class="btn-secondary" onclick="closeModal()">Fermer</button>
-      </div>
-    ` : `
-      <div class="form-actions" style="margin-top:1rem">
-        <button class="btn-secondary" onclick="closeModal()">Fermer</button>
-      </div>
-    `}
-  `);
+    </div>
+  `;
 }
 
 async function editInvLigne(ligneId, invId) {
@@ -1229,20 +1266,36 @@ async function saveInvLigne(ligneId, invId) {
   viewInventaire(invId);
 }
 
-async function updateInvLigne(ligneId, input) {
-  const reel = parseFloat(input.value);
-  if (isNaN(reel)) return;
-
-  const { data: ligne } = await sb.from('inventaire_lignes').select('quantite_theorique').eq('id', ligneId).single();
-  await sb.from('inventaire_lignes').update({ quantite_reelle: reel }).eq('id', ligneId);
-
-  // Mettre à jour l'écart affiché
-  const ecart = reel - (ligne?.quantite_theorique ?? 0);
-  const ecartEl = document.getElementById('inv-ecart-' + ligneId);
-  if (ecartEl) {
-    ecartEl.textContent = ecart > 0 ? '+' + ecart : ecart;
-    ecartEl.style.color = ecart < 0 ? 'var(--danger)' : ecart > 0 ? 'var(--success)' : 'var(--text-secondary)';
+async function invLigneChanged(ligneId, champ, valeur) {
+  const update = {};
+  if (champ === 'quantite_reelle' || champ === 'quantite_theorique') {
+    update[champ] = parseFloat(valeur) || 0;
+  } else {
+    update[champ] = valeur.trim() || null;
   }
+  await sb.from('inventaire_lignes').update(update).eq('id', ligneId);
+
+  // Mettre à jour l'écart si on a changé une quantité
+  if (champ === 'quantite_reelle') {
+    const { data: l } = await sb.from('inventaire_lignes').select('quantite_theorique, quantite_reelle').eq('id', ligneId).single();
+    const ecart = (l?.quantite_reelle ?? 0) - (l?.quantite_theorique ?? 0);
+    const ecartEl = document.getElementById('inv-ecart-' + ligneId);
+    if (ecartEl) {
+      ecartEl.textContent = ecart > 0 ? '+' + ecart : ecart;
+      ecartEl.style.color = ecart < 0 ? 'var(--danger)' : ecart > 0 ? 'var(--success)' : 'var(--text-secondary)';
+    }
+  }
+}
+
+async function ajouterLigneInv(invId) {
+  const { error } = await sb.from('inventaire_lignes').insert({
+    inventaire_id: invId,
+    reference: '',
+    quantite_theorique: 0,
+    quantite_reelle: 0
+  });
+  if (error) { toast('Erreur : ' + error.message, 'error'); return; }
+  viewInventaire(invId);
 }
 
 async function deleteInvLigne(ligneId, invId) {
@@ -1327,7 +1380,6 @@ async function cloturerInventaire(invId) {
   }
 
   toast(`Inventaire clôturé : ${mis_a_jour} article${mis_a_jour > 1 ? 's' : ''} mis à jour, ${crees} créé${crees > 1 ? 's' : ''}.`);
-  closeModal();
   renderInventaire();
 }
 
@@ -1487,13 +1539,14 @@ async function validateInvPhoto() {
   if (!invPhotoRows.length || !invPhotoId) return;
 
   const { data: stock } = await sb.from('stock').select('*');
+  let ok = 0, errors = 0;
 
   for (const row of invPhotoRows) {
     if (!row.reference) continue;
     const stockRow = stock?.find(s => s.reference === row.reference);
     const theorique = stockRow?.quantite ?? 0;
 
-    await sb.from('inventaire_lignes').upsert({
+    const { error } = await sb.from('inventaire_lignes').insert({
       inventaire_id: invPhotoId,
       reference: row.reference,
       lot: row.lot || null,
@@ -1501,12 +1554,19 @@ async function validateInvPhoto() {
       rangee: row.rangee || null,
       quantite_theorique: theorique,
       quantite_reelle: row.quantite ?? 0
-    }, { onConflict: 'inventaire_id,reference,depot' });
+    });
+
+    if (error) errors++;
+    else ok++;
   }
 
-  toast(`${invPhotoRows.length} ligne${invPhotoRows.length > 1 ? 's' : ''} importée${invPhotoRows.length > 1 ? 's' : ''} dans l'inventaire.`);
+  if (errors > 0) {
+    toast(`${ok} importée${ok > 1 ? 's' : ''}, ${errors} erreur${errors > 1 ? 's' : ''}.`, 'error');
+  } else {
+    toast(`${ok} ligne${ok > 1 ? 's' : ''} importée${ok > 1 ? 's' : ''} !`);
+  }
   closeModal();
-  renderInventaire();
+  viewInventaire(invPhotoId);
 }
 
 // ═══════════════════════════════════════ IMPORT PHOTO ════
