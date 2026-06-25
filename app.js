@@ -354,7 +354,7 @@ async function loadStockBatch() {
         <table>
           <thead><tr>
             <th>Référence</th><th>Lot</th><th>Dépôt</th><th>Rangée</th>
-            <th>Qté</th><th>Dispo</th><th>Remarque</th><th></th>
+            <th>Stock</th><th>Disponible</th><th>Remarque</th><th></th>
           </tr></thead>
           <tbody id="stock-tbody"></tbody>
         </table>
@@ -377,7 +377,7 @@ async function loadStockBatch() {
         <td>${badgeDepot(r.depot)}</td>
         <td>${fmt(r.rangee)}</td>
         <td class="td-qte">${r.quantite}</td>
-        <td class="td-qte" style="${reserve > 0 ? 'color:var(--warning)' : ''}">${dispo}${reserve > 0 ? ` <span style="font-size:.72rem;color:var(--text-secondary)">(${reserve} résa.)</span>` : ''}</td>
+        <td class="td-qte" style="${reserve > 0 ? 'color:var(--warning)' : ''}">${dispo}${reserve > 0 ? ` <span style="font-size:.72rem;color:var(--text-secondary)">(${reserve} en cde)</span>` : ''}</td>
         <td style="max-width:180px;font-size:.8rem;color:var(--text-secondary)">${fmt(r.remarque)}</td>
         <td><button class="btn-secondary btn-sm btn-icon" title="Modifier" onclick='openArticle("${r.id}")'>✎</button></td>`;
       tbody.appendChild(tr);
@@ -395,7 +395,7 @@ async function loadStockBatch() {
           ${r.lot ? `<span class="stock-card-lot">Lot : ${r.lot}</span>` : ''}
           <span class="badge badge-depot">${r.depot || '—'}</span>
           ${r.rangee ? `<span class="stock-card-rangee">Rangée ${r.rangee}</span>` : ''}
-          ${reserve > 0 ? `<span style="font-size:.78rem;color:var(--warning)">Dispo: ${dispo} (${reserve} résa.)</span>` : ''}
+          ${reserve > 0 ? `<span style="font-size:.78rem;color:var(--warning)">Disponible: ${dispo} (${reserve} en cde)</span>` : ''}
         </div>
         ${r.photos?.length ? `<div style="margin:.4rem 0"><img src="${r.photos[0]}" style="width:48px;height:48px;object-fit:cover;border-radius:4px;opacity:.85" /></div>` : ''}
         ${r.remarque ? `<div class="stock-card-remarque">${r.remarque}</div>` : ''}
@@ -456,10 +456,6 @@ async function openArticle(rowId) {
     </label>
 
     <div class="form-section-title" style="margin-top:1.2rem">Modifier</div>
-    <div class="form-group"><label>Référence</label>
-      <input type="text" id="edit-ref" value="${r.reference || ''}" style="font-family:monospace" /></div>
-    <div class="form-group"><label>N° de lot</label>
-      <input type="text" id="edit-lot" value="${r.lot || ''}" style="font-family:monospace" /></div>
     <div class="form-row">
       <div class="form-group"><label>Dépôt</label>
         <input type="text" id="edit-depot" value="${r.depot || ''}" /></div>
@@ -554,18 +550,12 @@ function editStock(row) {
 }
 
 async function saveEditStock(id) {
-  const ref = document.getElementById('edit-ref').value.trim();
-  const lot = document.getElementById('edit-lot').value.trim();
   const depot = document.getElementById('edit-depot').value.trim();
   const rangee = document.getElementById('edit-rangee').value.trim();
   const qte = parseFloat(document.getElementById('edit-qte').value);
   const remarque = document.getElementById('edit-remarque').value.trim();
 
-  if (!ref) { toast('La référence est obligatoire.', 'error'); return; }
-
   const { error } = await sb.from('stock').update({
-    reference: ref,
-    lot: lot || null,
     depot: depot || null, rangee: rangee || null,
     quantite: qte, remarque: remarque || null,
     updated_at: new Date().toISOString()
@@ -1291,10 +1281,24 @@ async function cloturerInventaire(invId) {
   const { data: lignes } = await sb.from('inventaire_lignes')
     .select('*').eq('inventaire_id', invId);
 
-  let crees = 0, mis_a_jour = 0;
-
+  // Regrouper les lignes par référence+lot pour cumuler les quantités
+  const groupes = {};
   for (const ligne of lignes || []) {
     if (!ligne.reference || ligne.quantite_reelle === null) continue;
+    const cle = `${ligne.reference}__${ligne.lot || ''}`;
+    if (!groupes[cle]) {
+      groupes[cle] = { ...ligne, quantite_reelle: 0 };
+    }
+    groupes[cle].quantite_reelle += ligne.quantite_reelle;
+    // Prendre le dépôt/rangée/remarque de la dernière ligne
+    if (ligne.depot) groupes[cle].depot = ligne.depot;
+    if (ligne.rangee) groupes[cle].rangee = ligne.rangee;
+    if (ligne.remarque) groupes[cle].remarque = ligne.remarque;
+  }
+
+  let crees = 0, mis_a_jour = 0;
+
+  for (const ligne of Object.values(groupes)) {
 
     // Chercher si la référence + lot existe déjà en stock
     let query = sb.from('stock').select('id').eq('reference', ligne.reference);
