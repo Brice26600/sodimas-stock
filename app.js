@@ -127,6 +127,20 @@ function closeModal() {
   document.getElementById('modal-overlay').classList.add('hidden');
 }
 
+// Fermer la modal seulement si le clic commence ET finit sur l'overlay (pas en glissant depuis l'intérieur)
+document.addEventListener('DOMContentLoaded', () => {
+  const overlay = document.getElementById('modal-overlay');
+  if (!overlay) return;
+  let mouseDownOnOverlay = false;
+  overlay.addEventListener('mousedown', e => {
+    mouseDownOnOverlay = e.target === overlay;
+  });
+  overlay.addEventListener('mouseup', e => {
+    if (mouseDownOnOverlay && e.target === overlay) closeModal();
+    mouseDownOnOverlay = false;
+  });
+});
+
 // ═══════════════════════════════════════ HELPERS ════
 function fmt(val) { return val ?? '—'; }
 function fmtDate(d) {
@@ -354,7 +368,7 @@ async function loadStockBatch() {
         <table>
           <thead><tr>
             <th>Référence</th><th>Lot</th><th>Dépôt</th><th>Rangée</th>
-            <th>Stock</th><th>Disponible</th><th>Remarque</th><th></th>
+            <th>Qté</th><th>Dispo</th><th>Remarque</th><th></th>
           </tr></thead>
           <tbody id="stock-tbody"></tbody>
         </table>
@@ -377,7 +391,7 @@ async function loadStockBatch() {
         <td>${badgeDepot(r.depot)}</td>
         <td>${fmt(r.rangee)}</td>
         <td class="td-qte">${r.quantite}</td>
-        <td class="td-qte" style="${reserve > 0 ? 'color:var(--warning)' : ''}">${dispo}${reserve > 0 ? ` <span style="font-size:.72rem;color:var(--text-secondary)">(${reserve} en cde)</span>` : ''}</td>
+        <td class="td-qte" style="${reserve > 0 ? 'color:var(--warning)' : ''}">${dispo}${reserve > 0 ? ` <span style="font-size:.72rem;color:var(--text-secondary)">(${reserve} résa.)</span>` : ''}</td>
         <td style="max-width:180px;font-size:.8rem;color:var(--text-secondary)">${fmt(r.remarque)}</td>
         <td><button class="btn-secondary btn-sm btn-icon" title="Modifier" onclick='openArticle("${r.id}")'>✎</button></td>`;
       tbody.appendChild(tr);
@@ -395,7 +409,7 @@ async function loadStockBatch() {
           ${r.lot ? `<span class="stock-card-lot">Lot : ${r.lot}</span>` : ''}
           <span class="badge badge-depot">${r.depot || '—'}</span>
           ${r.rangee ? `<span class="stock-card-rangee">Rangée ${r.rangee}</span>` : ''}
-          ${reserve > 0 ? `<span style="font-size:.78rem;color:var(--warning)">Disponible: ${dispo} (${reserve} en cde)</span>` : ''}
+          ${reserve > 0 ? `<span style="font-size:.78rem;color:var(--warning)">Dispo: ${dispo} (${reserve} résa.)</span>` : ''}
         </div>
         ${r.photos?.length ? `<div style="margin:.4rem 0"><img src="${r.photos[0]}" style="width:48px;height:48px;object-fit:cover;border-radius:4px;opacity:.85" /></div>` : ''}
         ${r.remarque ? `<div class="stock-card-remarque">${r.remarque}</div>` : ''}
@@ -456,6 +470,10 @@ async function openArticle(rowId) {
     </label>
 
     <div class="form-section-title" style="margin-top:1.2rem">Modifier</div>
+    <div class="form-group"><label>Référence</label>
+      <input type="text" id="edit-ref" value="${r.reference || ''}" style="font-family:monospace" /></div>
+    <div class="form-group"><label>N° de lot</label>
+      <input type="text" id="edit-lot" value="${r.lot || ''}" style="font-family:monospace" /></div>
     <div class="form-row">
       <div class="form-group"><label>Dépôt</label>
         <input type="text" id="edit-depot" value="${r.depot || ''}" /></div>
@@ -550,12 +568,17 @@ function editStock(row) {
 }
 
 async function saveEditStock(id) {
+  const ref = document.getElementById('edit-ref').value.trim();
+  const lot = document.getElementById('edit-lot').value.trim();
   const depot = document.getElementById('edit-depot').value.trim();
   const rangee = document.getElementById('edit-rangee').value.trim();
   const qte = parseFloat(document.getElementById('edit-qte').value);
   const remarque = document.getElementById('edit-remarque').value.trim();
 
+  if (!ref) { toast('La référence est obligatoire.', 'error'); return; }
+
   const { error } = await sb.from('stock').update({
+    reference: ref, lot: lot || null,
     depot: depot || null, rangee: rangee || null,
     quantite: qte, remarque: remarque || null,
     updated_at: new Date().toISOString()
@@ -1281,24 +1304,10 @@ async function cloturerInventaire(invId) {
   const { data: lignes } = await sb.from('inventaire_lignes')
     .select('*').eq('inventaire_id', invId);
 
-  // Regrouper les lignes par référence+lot pour cumuler les quantités
-  const groupes = {};
-  for (const ligne of lignes || []) {
-    if (!ligne.reference || ligne.quantite_reelle === null) continue;
-    const cle = `${ligne.reference}__${ligne.lot || ''}`;
-    if (!groupes[cle]) {
-      groupes[cle] = { ...ligne, quantite_reelle: 0 };
-    }
-    groupes[cle].quantite_reelle += ligne.quantite_reelle;
-    // Prendre le dépôt/rangée/remarque de la dernière ligne
-    if (ligne.depot) groupes[cle].depot = ligne.depot;
-    if (ligne.rangee) groupes[cle].rangee = ligne.rangee;
-    if (ligne.remarque) groupes[cle].remarque = ligne.remarque;
-  }
-
   let crees = 0, mis_a_jour = 0;
 
-  for (const ligne of Object.values(groupes)) {
+  for (const ligne of lignes || []) {
+    if (!ligne.reference || ligne.quantite_reelle === null) continue;
 
     // Chercher si la référence + lot existe déjà en stock
     let query = sb.from('stock').select('id').eq('reference', ligne.reference);
@@ -1428,15 +1437,24 @@ async function analyseInvPhoto() {
   const correctionsPrompt = buildCorrectionsPrompt(corrections);
 
   const prompt = `Tu analyses une feuille manuscrite d'inventaire de stock pour un entrepôt d'ascenseurs.
-Même conventions que d'habitude :
-- Références : x35/530/67 → 35SO530E00067, x36/570/09 → 36SO570E00009, x38/70/30 → 38SO070E00030
-- Quantités en bâtons : I=1, II=2, Γ=2, Π=3, □=4, □barré=5
-- Zones : D2A6 = Dépôt "2" Rangée "6", RENO 3 = Dépôt "RENO" Rangée "3"
-- " = même référence que la ligne précédente
+
+RÉFÉRENCES : x35/530/67 → 35SO530E00067, x36/570/09 → 36SO570E00009, x38/70/30 → 38SO070E00030
+Format : [2 chiffres]SO[3 chiffres]E[5 chiffres], zéros de remplissage à gauche. Ignorer le préfixe x/y/v.
+
+NUMÉROS DE LOT : "7" et "9" souvent confondus. 7 = trait horizontal haut + descend droit. 9 = boucle fermée en haut.
+
+QUANTITÉS — notation mixte, TRÈS IMPORTANT, les symboles s'ADDITIONNENT :
+- Symboles : I=1, II=2, III=3, Γ ou L cursif (équerre)=2, Π (portique, 2 traits reliés en haut)=3, □=4, □barré=5
+- Combinaisons : □barré+I=6, □barré+II=7, □barré+III=8, □barré+Γ=7, □+Γ=6, Π+I=4
+- Π ≠ Γ : Π a deux traits verticaux reliés en haut (=3) ; Γ a un seul trait avec crochet (=2)
+- Additionne TOUS les symboles présents pour une ligne, ne prends pas juste le dernier
+
+ZONES : D2A6 = Dépôt "2" Rangée "6", RENO 3 = Dépôt "RENO" Rangée "3"
+" = même référence que la ligne précédente. Accolade } = zone commune à toutes les lignes groupées.
 
 Retourne UNIQUEMENT un JSON valide :
 [{"reference": "35SO530E00067", "lot": "4500224268", "quantite": 1, "depot": "2", "rangee": "6", "remarque": null}, ...]
-Si valeur absente, mets null. Le champ "remarque" contient toute note ou commentaire écrit dans la colonne remarque de la feuille.${correctionsPrompt}`;
+Si valeur absente, mets null. Le champ "remarque" = tout commentaire dans la colonne remarque.${correctionsPrompt}`;
 
   try {
     const response = await fetch('/.netlify/functions/analyse', {
@@ -1702,7 +1720,7 @@ function renderImportPhoto() {
         <div class="table-wrapper stock-table-view">
           <table>
             <thead><tr>
-              <th>Référence</th><th>Lot</th><th>Qté</th><th>Dépôt</th><th>Rangée</th><th></th>
+              <th>Référence</th><th>Lot</th><th>Qté</th><th>Dépôt</th><th>Rangée</th><th>Remarque</th><th></th>
             </tr></thead>
             <tbody id="ip-tbody"></tbody>
           </table>
@@ -1750,46 +1768,39 @@ async function analyseImportPhoto() {
 
   const prompt = `Tu analyses une feuille manuscrite de gestion de stock pour un entrepôt d'ascenseurs.
 
-RÉFÉRENCES — format exact à reconstituer (toutes suivent le même schéma) :
+RÉFÉRENCES — format exact à reconstituer :
 - "x35/530/67" → "35SO530E00067"
-- "y35/530/76" → "35SO530E00076"
 - "x36/570/09" → "36SO570E00009"
-- "x38/70/30" → "38SO070E00030" (même schéma : "38SO" + 3 chiffres + "E" + 5 chiffres, donc 70 devient 070)
-- Le préfixe x/y/v/etc devant n'est qu'une coche, ignore-le complètement
-- Format général : [2 premiers chiffres]SO[3 chiffres]E[5 chiffres], avec zéros de remplissage à gauche
+- "x38/70/30" → "38SO070E00030" (70 devient 070 avec zéro de remplissage)
+- Le préfixe x/y/v/etc = coche à ignorer
+- Format : [2 chiffres]SO[3 chiffres]E[5 chiffres], avec zéros de remplissage à gauche
 
-NUMÉROS DE LOT — attention particulière :
-- Les chiffres "7" et "9" sont fréquemment confondus dans cette écriture manuscrite
-- Un "7" a une barre horizontale en haut et descend tout droit ou légèrement courbé
-- Un "9" a une boucle fermée en haut
-- Vérifie chaque chiffre 7/9 individuellement en comparant sa forme avec les autres occurrences du même chiffre sur la feuille
+NUMÉROS DE LOT :
+- "7" et "9" souvent confondus : 7 = barre horizontale en haut + trait droit ; 9 = boucle fermée en haut
+- Vérifie chaque 7/9 en comparant avec les autres occurrences sur la feuille
 
-QUANTITÉS — notation en bâtons, very important, lis attentivement :
-- "I" ou "l" ou "1" (un seul trait vertical) = 1
-- "II" ou "11" (deux traits verticaux) = 2
-- "Γ" ou "r" ou "L" cursif (forme de crochet/équerre) = 2
-- "Π" ou "n" (forme de portique, deux traits + barre du haut) = 3
-- "□" (carré simple) = 4
-- "□ barré" ou "carré avec diagonale" = 5
-- Compte soigneusement le nombre de traits verticaux distincts pour chaque symbole
+QUANTITÉS — notation mixte, TRÈS IMPORTANT :
+- Les symboles peuvent être COMBINÉS et doivent être ADDITIONNÉS, pas remplacés
+- Symboles de base : I=1, II=2, III=3, Γ ou L cursif=2, Π ou portique=3, □=4, □barré=5
+- Exemples de combinaisons : □barré + I = 6, □barré + II = 7, □barré + III = 8, □barré + Γ = 7, □ + Γ = 6
+- Π (portique) ≠ Γ (équerre) : Π a DEUX traits verticaux reliés en haut = 3 ; Γ a UN trait vertical avec crochet = 2
+- Compte chaque symbole séparément puis additionne
+- En cas de doute entre Γ (2) et Π (3), regarde si il y a un trait vertical à droite relié en haut
 
 ZONES :
 - "D2A6" = Dépôt "2" Rangée "6"
 - "RENO 8" = Dépôt "RENO" Rangée "8"
-- "RACK D2" = Dépôt "2" Rangée "RACK" (le numéro après D = le dépôt, RACK = la rangée)
+- "RACK D2" = Dépôt "2" Rangée "RACK"
 
 AUTRES RÈGLES :
-- Les x/coches devant une ligne = référence déjà préparée, ignore juste le symbole mais garde la ligne
-- Le symbole " ou // sous une référence = même référence que la ligne du dessus
-- Une accolade } regroupant plusieurs lignes avec une seule zone à droite = cette zone s'applique à toutes les lignes regroupées
+- x/coches = référence préparée, garde la ligne mais ignore la coche
+- " ou // = même référence que la ligne du dessus
+- Accolade } = zone s'applique à toutes les lignes regroupées
+- Colonne REMARQUE : noter tout commentaire écrit dans cette colonne
 
-Extrais TOUTES les lignes de la feuille et retourne UNIQUEMENT un JSON valide (sans markdown, sans texte autour) de ce format :
-[
-  {"reference": "35SO530E00067", "lot": "4500224268", "quantite": 1, "depot": "2", "rangee": "6"},
-  ...
-]
-
-Si une valeur est illisible ou absente, mets null. Ne mets jamais de commentaires dans le JSON. Vérifie deux fois chaque quantité en bâtons et chaque chiffre 7/9 avant de répondre.${correctionsPrompt}`;
+Retourne UNIQUEMENT un JSON valide :
+[{"reference": "35SO530E00067", "lot": "4500224268", "quantite": 1, "depot": "2", "rangee": "6", "remarque": null}, ...]
+Si valeur absente, mets null. Vérifie DEUX FOIS chaque quantité avant de répondre.${correctionsPrompt}`;
 
   try {
     const response = await fetch('/.netlify/functions/analyse', {
@@ -1843,6 +1854,7 @@ function renderImportTable() {
       <td><input type="number" value="${row.quantite ?? 1}" min="1" onchange="importRows[${i}].quantite=parseFloat(this.value)" style="width:60px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.85rem" /></td>
       <td><input type="text" value="${row.depot || ''}" onchange="importRows[${i}].depot=this.value" style="width:70px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.85rem" /></td>
       <td><input type="text" value="${row.rangee || ''}" onchange="importRows[${i}].rangee=this.value" style="width:70px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.85rem" /></td>
+      <td><input type="text" value="${row.remarque || ''}" onchange="importRows[${i}].remarque=this.value" style="width:100%;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.82rem" placeholder="remarque…" /></td>
       <td><button class="btn-danger btn-sm" onclick="removeImportRow(${i})">✕</button></td>
     `;
     tbody.appendChild(tr);
@@ -1862,12 +1874,12 @@ function renderImportTable() {
         </div>
         <div class="form-group" style="margin-bottom:.6rem">
           <label>Référence</label>
-          <input type="text" value="${row.reference || ''}" onchange="importRows[${i}].reference=this.value;syncImportTable()" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem;font-family:monospace" />
+          <input type="text" value="${row.reference || ''}" onchange="importRows[${i}].reference=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem;font-family:monospace" />
         </div>
         <div class="form-row">
           <div class="form-group" style="margin-bottom:.6rem">
             <label>N° de lot</label>
-            <input type="text" value="${row.lot || ''}" onchange="importRows[${i}].lot=this.value;syncImportTable()" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.88rem;font-family:monospace" />
+            <input type="text" value="${row.lot || ''}" onchange="importRows[${i}].lot=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.88rem;font-family:monospace" />
           </div>
           <div class="form-group" style="margin-bottom:.6rem">
             <label>Quantité</label>
@@ -1875,14 +1887,18 @@ function renderImportTable() {
           </div>
         </div>
         <div class="form-row">
-          <div class="form-group" style="margin-bottom:0">
+          <div class="form-group" style="margin-bottom:.5rem">
             <label>Dépôt</label>
             <input type="text" value="${row.depot || ''}" onchange="importRows[${i}].depot=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
           </div>
-          <div class="form-group" style="margin-bottom:0">
+          <div class="form-group" style="margin-bottom:.5rem">
             <label>Rangée</label>
             <input type="text" value="${row.rangee || ''}" onchange="importRows[${i}].rangee=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
           </div>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label>Remarque</label>
+          <input type="text" value="${row.remarque || ''}" onchange="importRows[${i}].remarque=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" placeholder="remarque…" />
         </div>
       `;
       cardsWrap.appendChild(div);
@@ -1917,48 +1933,58 @@ async function validateImport() {
   const date = document.getElementById('ip-date').value;
   const auteur = currentProfile?.prenom || currentUser?.email;
 
-  let errors = 0;
+  let ok = 0, errors = 0;
   for (const row of importRows) {
     if (!row.reference || !row.quantite) { errors++; continue; }
 
-    // Mettre à jour le stock
     if (type === 'sortie') {
-      const { data: existing } = await sb.from('stock').select('id, quantite')
-        .eq('reference', row.reference)
-        .maybeSingle();
+      // Chercher par ref+lot
+      let q = sb.from('stock').select('id, quantite').eq('reference', row.reference);
+      q = row.lot ? q.eq('lot', row.lot) : q.is('lot', null);
+      const { data: existing } = await q.maybeSingle();
       if (existing) {
-        const newQte = Math.max(0, existing.quantite - row.quantite);
-        await sb.from('stock').update({ quantite: newQte, updated_at: new Date().toISOString() }).eq('id', existing.id);
+        await sb.from('stock').update({
+          quantite: Math.max(0, existing.quantite - row.quantite),
+          updated_at: new Date().toISOString()
+        }).eq('id', existing.id);
       }
     } else {
-      const { data: existing } = await sb.from('stock').select('id, quantite')
-        .eq('reference', row.reference)
-        .maybeSingle();
+      // Entrée — chercher par ref+lot+depot
+      let q = sb.from('stock').select('id, quantite').eq('reference', row.reference);
+      q = row.lot ? q.eq('lot', row.lot) : q.is('lot', null);
+      if (row.depot) q = q.eq('depot', row.depot);
+      const { data: existing } = await q.maybeSingle();
+
       if (existing) {
-        await sb.from('stock').update({ quantite: existing.quantite + row.quantite, updated_at: new Date().toISOString() }).eq('id', existing.id);
+        await sb.from('stock').update({
+          quantite: existing.quantite + row.quantite,
+          updated_at: new Date().toISOString()
+        }).eq('id', existing.id);
       } else {
+        // Créer la ligne avec tous les champs
         await sb.from('stock').insert({
-          reference: row.reference, lot: row.lot || null,
-          depot: row.depot || null, rangee: row.rangee || null,
-          quantite: row.quantite
+          reference: row.reference,
+          lot: row.lot || null,
+          depot: row.depot || null,
+          rangee: row.rangee || null,
+          remarque: row.remarque || null,
+          quantite: row.quantite,
+          quantite_reservee: 0
         });
       }
     }
 
-    // Enregistrer le mouvement
     await sb.from('mouvements').insert({
       date_mouvement: date, type_mouvement: type,
       reference: row.reference, lot: row.lot || null,
       depot: row.depot || null, rangee: row.rangee || null,
       quantite: row.quantite, auteur, source: 'import_photo',
-      remarque: 'Import par photo'
+      remarque: row.remarque || 'Import par photo'
     });
+    ok++;
   }
 
-  const ok = importRows.length - errors;
   toast(`${ok} mouvement${ok > 1 ? 's' : ''} importé${ok > 1 ? 's' : ''} avec succès !`);
-
-  // Reset
   importRows = [];
   importPhotoData = null;
   renderImportPhoto();
