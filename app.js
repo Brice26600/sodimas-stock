@@ -1669,13 +1669,11 @@ let importDate = new Date().toISOString().slice(0, 10);
 function renderImportPhoto() {
   const el = document.getElementById('page-import-photo');
   el.innerHTML = `
-    <div class="card form-card" style="max-width:720px">
-      <div class="card-header"><div class="card-title">Import par photo</div></div>
-      <p style="font-size:.88rem;color:var(--text-secondary);margin-bottom:1.2rem">
-        Prenez en photo une feuille manuscrite d'entrées ou de sorties. Claude va lire les références, lots, quantités et zones automatiquement.
-      </p>
+    <div style="display:flex;align-items:center;gap:.8rem;margin-bottom:1rem;flex-wrap:wrap">
+      <h2 style="font-size:1rem;font-weight:600;flex:1">Import par photo</h2>
+    </div>
 
-      <div class="form-section-title">Type de mouvement & date</div>
+    <div class="card" style="margin-bottom:1rem">
       <div class="form-row">
         <div class="form-group"><label>Type *</label>
           <select id="ip-type" onchange="importType=this.value">
@@ -1688,8 +1686,7 @@ function renderImportPhoto() {
         </div>
       </div>
 
-      <div class="form-section-title">Photo de la feuille</div>
-      <div id="ip-drop-zone" class="ip-drop-zone" onclick="document.getElementById('ip-file').click()">
+      <div id="ip-drop-zone" class="ip-drop-zone" onclick="document.getElementById('ip-file').click()" style="margin-top:.5rem">
         <div id="ip-preview-wrap">
           <div class="ip-drop-icon">📷</div>
           <p>Appuyez pour prendre une photo ou choisir depuis la galerie</p>
@@ -1698,14 +1695,12 @@ function renderImportPhoto() {
       </div>
 
       <div id="ip-analyse-wrap" class="hidden" style="margin-top:1rem">
-        <button class="btn-primary" id="ip-analyse-btn" onclick="analyseImportPhoto()">
-          🔍 Analyser la photo
-        </button>
+        <button class="btn-primary" id="ip-analyse-btn" onclick="analyseImportPhoto()">🔍 Analyser la photo</button>
       </div>
     </div>
 
-    <div id="ip-results-wrap" class="hidden" style="margin-top:1rem">
-      <div class="card" style="max-width:720px">
+    <div id="ip-results-wrap" class="hidden">
+      <div class="card">
         <div class="card-header">
           <div class="card-title">Vérification — <span id="ip-results-count"></span></div>
           <div style="display:flex;gap:.5rem">
@@ -1713,10 +1708,9 @@ function renderImportPhoto() {
             <button class="btn-success" onclick="validateImport()">✓ Valider l'import</button>
           </div>
         </div>
-        <p style="font-size:.82rem;color:var(--text-secondary);margin-bottom:.8rem">
-          Vérifiez et corrigez si nécessaire avant de valider.
-        </p>
-        <!-- Vue tableau (desktop) -->
+        <p style="font-size:.82rem;color:var(--text-secondary);margin-bottom:.8rem">Vérifiez et corrigez si nécessaire avant de valider.</p>
+
+        <!-- Vue tableau desktop -->
         <div class="table-wrapper stock-table-view">
           <table>
             <thead><tr>
@@ -1725,7 +1719,7 @@ function renderImportPhoto() {
             <tbody id="ip-tbody"></tbody>
           </table>
         </div>
-        <!-- Vue cartes (mobile/tablette) -->
+        <!-- Vue cartes mobile/tablette -->
         <div class="stock-card-view" id="ip-cards"></div>
       </div>
     </div>
