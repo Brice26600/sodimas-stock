@@ -1943,11 +1943,11 @@ async function validateImport() {
         }).eq('id', existing.id);
       }
     } else {
-      // Entrée — chercher par ref+lot+depot
+      // Entrée — chercher par ref+lot (sans filtre dépôt pour éviter les doublons)
       let q = sb.from('stock').select('id, quantite').eq('reference', row.reference);
       q = row.lot ? q.eq('lot', row.lot) : q.is('lot', null);
-      if (row.depot) q = q.eq('depot', row.depot);
-      const { data: existing } = await q.maybeSingle();
+      const { data: existingRows } = await q.limit(1);
+      const existing = existingRows?.[0] || null;
 
       if (existing) {
         await sb.from('stock').update({
@@ -1955,7 +1955,6 @@ async function validateImport() {
           updated_at: new Date().toISOString()
         }).eq('id', existing.id);
       } else {
-        // Créer la ligne avec tous les champs
         await sb.from('stock').insert({
           reference: row.reference,
           lot: row.lot || null,
