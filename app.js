@@ -1400,7 +1400,7 @@ function importPhotoInventaire(invId) {
       <div id="inv-cards"></div>
       <div class="form-actions" style="margin-top:1rem">
         <button class="btn-secondary" onclick="addInvRow()">+ Ligne</button>
-        <button class="btn-success" onclick="validateInvPhoto()">✓ Importer dans l'inventaire</button>
+        <button class="btn-success" id="inv-validate-btn" onclick="validateInvPhoto()">✓ Importer dans l'inventaire</button>
       </div>
     </div>
   `);
@@ -1622,6 +1622,13 @@ function buildCorrectionsPrompt(corrections) {
 async function validateInvPhoto() {
   if (!invPhotoRows.length || !invPhotoId) return;
 
+  const btn = document.getElementById('inv-validate-btn');
+  if (btn) {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = '⏳ Import en cours…';
+  }
+
   // Enregistrer les corrections (diff entre ce que Claude a lu et ce que l'utilisateur a validé)
   if (invPhotoRowsOriginal.length) {
     await enregistrerCorrections(invPhotoRowsOriginal, invPhotoRows);
@@ -1705,7 +1712,7 @@ function renderImportPhoto() {
           <div class="card-title">Vérification — <span id="ip-results-count"></span></div>
           <div style="display:flex;gap:.5rem">
             <button class="btn-secondary btn-sm" onclick="addImportRow()">+ Ligne</button>
-            <button class="btn-success" onclick="validateImport()">✓ Valider l'import</button>
+            <button class="btn-success" id="ip-validate-btn" onclick="validateImport()">✓ Valider l'import</button>
           </div>
         </div>
         <p style="font-size:.82rem;color:var(--text-secondary);margin-bottom:.8rem">Vérifiez et corrigez si nécessaire avant de valider.</p>
@@ -1917,6 +1924,13 @@ function removeImportRow(i) {
 
 async function validateImport() {
   if (!importRows.length) { toast('Aucune ligne à importer.', 'error'); return; }
+
+  const btn = document.getElementById('ip-validate-btn');
+  if (btn) {
+    if (btn.disabled) return; // protection double-clic
+    btn.disabled = true;
+    btn.textContent = '⏳ Import en cours…';
+  }
 
   // Enregistrer les corrections
   if (importRowsOriginal.length) {
