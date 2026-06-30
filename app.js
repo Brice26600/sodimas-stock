@@ -391,8 +391,8 @@ async function loadStockBatch() {
         <td style="font-size:.78rem;color:var(--text-secondary)">${fmt(r.conditionnement)}</td>
         <td>${badgeDepot(r.depot)}</td>
         <td>${fmt(r.rangee)}</td>
-        <td class="td-qte">${r.quantite}</td>
-        <td class="td-qte" style="${reserve > 0 ? 'color:var(--warning)' : ''}">${dispo}${reserve > 0 ? ` <span style="font-size:.72rem;color:var(--text-secondary)">(${reserve} en cde)</span>` : ''}</td>
+        <td style="font-size:1.05rem;font-weight:700;color:var(--accent);text-align:center">${r.quantite}</td>
+        <td style="font-size:1.05rem;font-weight:700;text-align:center;${reserve > 0 ? 'color:var(--warning)' : 'color:var(--success)'}">${dispo}${reserve > 0 ? `<br/><span style="font-size:.7rem;font-weight:400;color:var(--text-secondary)">(${reserve} en cde)</span>` : ''}</td>
         <td style="max-width:180px;font-size:.8rem;color:var(--text-secondary)">${fmt(r.remarque)}</td>
         <td><button class="btn-secondary btn-sm btn-icon" title="Modifier" onclick='openArticle("${r.id}")'>✎</button></td>`;
       tbody.appendChild(tr);
@@ -404,7 +404,7 @@ async function loadStockBatch() {
       div.innerHTML = `
         <div class="stock-card-top" onclick="openArticle('${r.id}')" style="cursor:pointer">
           <span class="stock-card-ref">${fmt(r.reference)}</span>
-          <span class="stock-card-qte">${r.quantite}</span>
+          <span class="stock-card-qte" style="font-size:1.5rem;font-weight:800;color:var(--accent)">${r.quantite}</span>
         </div>
         <div class="stock-card-meta">
           ${r.lot ? `<span class="stock-card-lot">Lot : ${r.lot}</span>` : ''}
