@@ -367,8 +367,8 @@ async function loadStockBatch() {
       <div class="table-wrapper stock-table-view">
         <table>
           <thead><tr>
-            <th>Référence</th><th>Lot</th><th>Dépôt</th><th>Rangée</th>
-            <th>Qté</th><th>Dispo</th><th>Remarque</th><th></th>
+            <th>Référence</th><th>Lot</th><th>Cond.</th><th>Dépôt</th><th>Rangée</th>
+            <th>Stock</th><th>Disponible</th><th>Remarque</th><th></th>
           </tr></thead>
           <tbody id="stock-tbody"></tbody>
         </table>
@@ -388,10 +388,11 @@ async function loadStockBatch() {
       tr.innerHTML = `
         <td class="td-ref" style="cursor:pointer" onclick="openArticle('${r.id}')">${fmt(r.reference)}</td>
         <td class="td-lot">${fmt(r.lot)}</td>
+        <td style="font-size:.78rem;color:var(--text-secondary)">${fmt(r.conditionnement)}</td>
         <td>${badgeDepot(r.depot)}</td>
         <td>${fmt(r.rangee)}</td>
         <td class="td-qte">${r.quantite}</td>
-        <td class="td-qte" style="${reserve > 0 ? 'color:var(--warning)' : ''}">${dispo}${reserve > 0 ? ` <span style="font-size:.72rem;color:var(--text-secondary)">(${reserve} résa.)</span>` : ''}</td>
+        <td class="td-qte" style="${reserve > 0 ? 'color:var(--warning)' : ''}">${dispo}${reserve > 0 ? ` <span style="font-size:.72rem;color:var(--text-secondary)">(${reserve} en cde)</span>` : ''}</td>
         <td style="max-width:180px;font-size:.8rem;color:var(--text-secondary)">${fmt(r.remarque)}</td>
         <td><button class="btn-secondary btn-sm btn-icon" title="Modifier" onclick='openArticle("${r.id}")'>✎</button></td>`;
       tbody.appendChild(tr);
@@ -407,9 +408,10 @@ async function loadStockBatch() {
         </div>
         <div class="stock-card-meta">
           ${r.lot ? `<span class="stock-card-lot">Lot : ${r.lot}</span>` : ''}
+          ${r.conditionnement ? `<span class="badge" style="background:var(--accent-light);color:var(--accent)">${r.conditionnement}</span>` : ''}
           <span class="badge badge-depot">${r.depot || '—'}</span>
           ${r.rangee ? `<span class="stock-card-rangee">Rangée ${r.rangee}</span>` : ''}
-          ${reserve > 0 ? `<span style="font-size:.78rem;color:var(--warning)">Dispo: ${dispo} (${reserve} résa.)</span>` : ''}
+          ${reserve > 0 ? `<span style="font-size:.78rem;color:var(--warning)">Disponible: ${dispo} (${reserve} en cde)</span>` : ''}
         </div>
         ${r.photos?.length ? `<div style="margin:.4rem 0"><img src="${r.photos[0]}" style="width:48px;height:48px;object-fit:cover;border-radius:4px;opacity:.85" /></div>` : ''}
         ${r.remarque ? `<div class="stock-card-remarque">${r.remarque}</div>` : ''}
@@ -449,6 +451,7 @@ async function openArticle(rowId) {
       <span class="badge badge-depot" style="font-size:.85rem">${r.depot || '—'}</span>
       ${r.rangee ? `<span style="font-size:.85rem;color:var(--text-secondary)">Rangée ${r.rangee}</span>` : ''}
       ${r.lot ? `<span style="font-size:.82rem;color:var(--text-secondary);font-family:monospace">Lot : ${r.lot}</span>` : ''}
+      ${r.conditionnement ? `<span class="badge" style="background:var(--accent-light);color:var(--accent)">${r.conditionnement}</span>` : ''}
     </div>
     <div style="font-size:1.3rem;font-weight:700;margin-bottom:1rem">
       Quantité : <span style="color:var(--accent)">${r.quantite}</span>
@@ -474,6 +477,8 @@ async function openArticle(rowId) {
       <input type="text" id="edit-ref" value="${r.reference || ''}" style="font-family:monospace" /></div>
     <div class="form-group"><label>N° de lot</label>
       <input type="text" id="edit-lot" value="${r.lot || ''}" style="font-family:monospace" /></div>
+    <div class="form-group"><label>Conditionnement</label>
+      <input type="text" id="edit-conditionnement" value="${r.conditionnement || ''}" placeholder="ex: palette, caisse, colis…" /></div>
     <div class="form-row">
       <div class="form-group"><label>Dépôt</label>
         <input type="text" id="edit-depot" value="${r.depot || ''}" /></div>
@@ -570,6 +575,7 @@ function editStock(row) {
 async function saveEditStock(id) {
   const ref = document.getElementById('edit-ref').value.trim();
   const lot = document.getElementById('edit-lot').value.trim();
+  const conditionnement = document.getElementById('edit-conditionnement').value.trim();
   const depot = document.getElementById('edit-depot').value.trim();
   const rangee = document.getElementById('edit-rangee').value.trim();
   const qte = parseFloat(document.getElementById('edit-qte').value);
@@ -578,7 +584,7 @@ async function saveEditStock(id) {
   if (!ref) { toast('La référence est obligatoire.', 'error'); return; }
 
   const { error } = await sb.from('stock').update({
-    reference: ref, lot: lot || null,
+    reference: ref, lot: lot || null, conditionnement: conditionnement || null,
     depot: depot || null, rangee: rangee || null,
     quantite: qte, remarque: remarque || null,
     updated_at: new Date().toISOString()
@@ -602,6 +608,8 @@ async function renderEntree() {
         <input type="text" id="e-ref" placeholder="ex: 35SO530E00077" /></div>
       <div class="form-group"><label>Numéro de lot</label>
         <input type="text" id="e-lot" placeholder="ex: 4500173743" /></div>
+      <div class="form-group"><label>Conditionnement</label>
+        <input type="text" id="e-conditionnement" placeholder="ex: palette, caisse, colis…" /></div>
       <div class="form-group"><label>Désignation</label>
         <input type="text" id="e-desig" placeholder="ex: Caisse bois, Palette mécanisme…" /></div>
       <div class="form-section-title">Emplacement</div>
@@ -636,6 +644,7 @@ async function renderEntree() {
 async function saveEntree() {
   const ref = document.getElementById('e-ref').value.trim();
   const lot = document.getElementById('e-lot').value.trim();
+  const conditionnement = document.getElementById('e-conditionnement').value.trim();
   const desig = document.getElementById('e-desig').value.trim();
   const depot = document.getElementById('e-depot').value.trim();
   const rangee = document.getElementById('e-rangee').value.trim();
@@ -647,14 +656,12 @@ async function saveEntree() {
   if (!depot) { toast('Le dépôt est obligatoire.', 'error'); return; }
   if (!qte || qte <= 0) { toast('La quantité doit être supérieure à 0.', 'error'); return; }
 
-  // Vérifier si la ligne existe déjà dans le stock (même ref + lot)
+  // Vérifier si la ligne existe déjà dans le stock (même ref + lot + dépôt + conditionnement)
   let stockQuery = sb.from('stock').select('id, quantite').eq('reference', ref);
-  if (lot) {
-    stockQuery = stockQuery.eq('lot', lot);
-  } else {
-    stockQuery = stockQuery.is('lot', null);
-  }
-  const { data: existing } = await stockQuery.eq('depot', depot).maybeSingle();
+  stockQuery = lot ? stockQuery.eq('lot', lot) : stockQuery.is('lot', null);
+  stockQuery = conditionnement ? stockQuery.eq('conditionnement', conditionnement) : stockQuery.is('conditionnement', null);
+  const { data: existingRows } = await stockQuery.eq('depot', depot).limit(1);
+  const existing = existingRows?.[0] || null;
 
   let stockError;
   if (existing) {
@@ -667,7 +674,7 @@ async function saveEntree() {
   } else {
     // Créer une nouvelle ligne
     const { error } = await sb.from('stock').insert({
-      reference: ref, lot: lot || null, designation: desig || null,
+      reference: ref, lot: lot || null, conditionnement: conditionnement || null, designation: desig || null,
       depot, rangee: rangee || null, quantite: qte,
       remarque: remarque || null
     });
@@ -679,7 +686,7 @@ async function saveEntree() {
   // Enregistrer le mouvement
   await sb.from('mouvements').insert({
     date_mouvement: date, type_mouvement: 'entree',
-    reference: ref, lot: lot || null, designation: desig || null,
+    reference: ref, lot: lot || null, conditionnement: conditionnement || null, designation: desig || null,
     depot, rangee: rangee || null, quantite: qte,
     remarque: remarque || null,
     auteur: currentProfile?.prenom || currentUser?.email,
@@ -691,7 +698,7 @@ async function saveEntree() {
 }
 
 function resetEntreeForm() {
-  ['e-ref','e-lot','e-desig','e-depot','e-rangee','e-remarque'].forEach(id => {
+  ['e-ref','e-lot','e-conditionnement','e-desig','e-depot','e-rangee','e-remarque'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
@@ -1182,7 +1189,7 @@ async function viewInventaire(invId) {
         <div class="table-wrapper stock-table-view">
           <table>
             <thead><tr>
-              <th>Référence</th><th>Lot</th><th>Dépôt</th><th>Rangée</th>
+              <th>Référence</th><th>Lot</th><th>Cond.</th><th>Dépôt</th><th>Rangée</th>
               <th>Théorique</th><th>Réel</th><th>Écart</th><th>Remarque</th>
               ${isEnCours ? '<th></th>' : ''}
             </tr></thead>
@@ -1192,6 +1199,7 @@ async function viewInventaire(invId) {
                 return `<tr>
                   <td>${isEnCours ? `<input type="text" value="${l.reference || ''}" onchange="invLigneChanged('${l.id}','reference',this.value)" style="width:100%;padding:.25rem .4rem;border:1.5px solid var(--border);border-radius:4px;font-size:.8rem;font-family:monospace" />` : `<span class="td-ref" style="font-size:.78rem">${l.reference}</span>`}</td>
                   <td>${isEnCours ? `<input type="text" value="${l.lot || ''}" onchange="invLigneChanged('${l.id}','lot',this.value)" style="width:100%;padding:.25rem .4rem;border:1.5px solid var(--border);border-radius:4px;font-size:.78rem;font-family:monospace" />` : `<span class="td-lot">${fmt(l.lot)}</span>`}</td>
+                  <td>${isEnCours ? `<input type="text" value="${l.conditionnement || ''}" onchange="invLigneChanged('${l.id}','conditionnement',this.value)" style="width:80px;padding:.25rem .4rem;border:1.5px solid var(--border);border-radius:4px;font-size:.78rem" placeholder="palette…" />` : `<span style="font-size:.78rem;color:var(--text-secondary)">${fmt(l.conditionnement)}</span>`}</td>
                   <td>${isEnCours ? `<input type="text" value="${l.depot || ''}" onchange="invLigneChanged('${l.id}','depot',this.value)" style="width:70px;padding:.25rem .4rem;border:1.5px solid var(--border);border-radius:4px;font-size:.82rem" />` : badgeDepot(l.depot)}</td>
                   <td>${isEnCours ? `<input type="text" value="${l.rangee || ''}" onchange="invLigneChanged('${l.id}','rangee',this.value)" style="width:65px;padding:.25rem .4rem;border:1.5px solid var(--border);border-radius:4px;font-size:.82rem" />` : `${fmt(l.rangee)}`}</td>
                   <td class="td-qte">${l.quantite_theorique ?? 0}</td>
@@ -1222,13 +1230,15 @@ async function viewInventaire(invId) {
                   <div class="form-group" style="margin-bottom:.5rem"><label>Qté réelle</label>
                     <input type="number" min="0" value="${l.quantite_reelle ?? 0}" onchange="invLigneChanged('${l.id}','quantite_reelle',this.value)" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" /></div>
                 </div>
+                <div class="form-group" style="margin-bottom:.5rem"><label>Conditionnement</label>
+                  <input type="text" value="${l.conditionnement || ''}" onchange="invLigneChanged('${l.id}','conditionnement',this.value)" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" placeholder="palette, caisse, colis…" /></div>
                 <div class="form-row">
                   <div class="form-group" style="margin-bottom:0"><label>Dépôt</label>
                     <input type="text" value="${l.depot || ''}" onchange="invLigneChanged('${l.id}','depot',this.value)" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" /></div>
                   <div class="form-group" style="margin-bottom:0"><label>Rangée</label>
                     <input type="text" value="${l.rangee || ''}" onchange="invLigneChanged('${l.id}','rangee',this.value)" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" /></div>
                 </div>
-              ` : `<div style="font-size:.85rem;color:var(--text-secondary)">Lot : ${fmt(l.lot)} | ${l.depot || '—'} / ${l.rangee || '—'}</div>`}
+              ` : `<div style="font-size:.85rem;color:var(--text-secondary)">Lot : ${fmt(l.lot)} | ${fmt(l.conditionnement)} | ${l.depot || '—'} / ${l.rangee || '—'}</div>`}
               <div style="margin-top:.5rem;font-size:.85rem">
                 Théorique : <strong>${l.quantite_theorique ?? 0}</strong> → Réel : <strong>${l.quantite_reelle ?? 0}</strong> →
                 Écart : <strong style="color:${ecart < 0 ? 'var(--danger)' : ecart > 0 ? 'var(--success)' : 'var(--text-secondary)'}">${ecart > 0 ? '+'+ecart : ecart}</strong>
@@ -1309,14 +1319,25 @@ async function cloturerInventaire(invId) {
   for (const ligne of lignes || []) {
     if (!ligne.reference || ligne.quantite_reelle === null) continue;
 
-    // Chercher si la référence + lot existe déjà en stock
+    // Chercher si la référence + lot + dépôt + conditionnement existe déjà en stock
     let query = sb.from('stock').select('id').eq('reference', ligne.reference);
     if (ligne.lot) {
       query = query.eq('lot', ligne.lot);
     } else {
       query = query.is('lot', null);
     }
-    const { data: existing } = await query.maybeSingle();
+    if (ligne.depot) {
+      query = query.eq('depot', ligne.depot);
+    } else {
+      query = query.is('depot', null);
+    }
+    if (ligne.conditionnement) {
+      query = query.eq('conditionnement', ligne.conditionnement);
+    } else {
+      query = query.is('conditionnement', null);
+    }
+    const { data: existingRows } = await query.limit(1);
+    const existing = existingRows?.[0] || null;
 
     if (existing) {
       // Mettre à jour la quantité
@@ -1333,6 +1354,7 @@ async function cloturerInventaire(invId) {
       await sb.from('stock').insert({
         reference: ligne.reference,
         lot: ligne.lot || null,
+        conditionnement: ligne.conditionnement || null,
         depot: ligne.depot || null,
         rangee: ligne.rangee || null,
         remarque: ligne.remarque || null,
@@ -1452,8 +1474,10 @@ QUANTITÉS — notation mixte, TRÈS IMPORTANT, les symboles s'ADDITIONNENT :
 ZONES : D2A6 = Dépôt "2" Rangée "6", RENO 3 = Dépôt "RENO" Rangée "3"
 " = même référence que la ligne précédente. Accolade } = zone commune à toutes les lignes groupées.
 
+CONDITIONNEMENT : si la feuille précise palette/caisse/colis/pièce (ex: "2 PAL", "5 colis"), extraire ce mot dans le champ conditionnement, sinon null. Si une même référence+lot apparaît avec des conditionnements DIFFÉRENTS sur la feuille, crée une ligne JSON distincte pour chacun (ne pas additionner).
+
 Retourne UNIQUEMENT un JSON valide :
-[{"reference": "35SO530E00067", "lot": "4500224268", "quantite": 1, "depot": "2", "rangee": "6", "remarque": null}, ...]
+[{"reference": "35SO530E00067", "lot": "4500224268", "quantite": 1, "conditionnement": null, "depot": "2", "rangee": "6", "remarque": null}, ...]
 Si valeur absente, mets null. Le champ "remarque" = tout commentaire dans la colonne remarque.${correctionsPrompt}`;
 
   try {
@@ -1520,6 +1544,10 @@ function renderInvCards() {
           <input type="number" value="${row.quantite ?? 0}" min="0" onchange="invPhotoRows[${i}].quantite=parseFloat(this.value)" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
         </div>
       </div>
+      <div class="form-group" style="margin-bottom:.6rem">
+        <label>Conditionnement</label>
+        <input type="text" value="${row.conditionnement || ''}" onchange="invPhotoRows[${i}].conditionnement=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" placeholder="palette, caisse, colis…" />
+      </div>
       <div class="form-row">
         <div class="form-group" style="margin-bottom:0">
           <label>Dépôt</label>
@@ -1540,7 +1568,7 @@ function renderInvCards() {
 }
 
 function addInvRow() {
-  invPhotoRows.push({ reference: '', lot: '', quantite: 0, depot: '', rangee: '' });
+  invPhotoRows.push({ reference: '', lot: '', conditionnement: '', quantite: 0, depot: '', rangee: '' });
   renderInvCards();
   document.getElementById('inv-results-wrap').classList.remove('hidden');
 }
@@ -1646,6 +1674,7 @@ async function validateInvPhoto() {
       inventaire_id: invPhotoId,
       reference: row.reference,
       lot: row.lot || null,
+      conditionnement: row.conditionnement || null,
       depot: row.depot || null,
       rangee: row.rangee || null,
       remarque: row.remarque || null,
@@ -1721,7 +1750,7 @@ function renderImportPhoto() {
         <div class="table-wrapper stock-table-view">
           <table>
             <thead><tr>
-              <th>Référence</th><th>Lot</th><th>Qté</th><th>Dépôt</th><th>Rangée</th><th>Remarque</th><th></th>
+              <th>Référence</th><th>Lot</th><th>Cond.</th><th>Qté</th><th>Dépôt</th><th>Rangée</th><th>Remarque</th><th></th>
             </tr></thead>
             <tbody id="ip-tbody"></tbody>
           </table>
@@ -1798,9 +1827,11 @@ AUTRES RÈGLES :
 - " ou // = même référence que la ligne du dessus
 - Accolade } = zone s'applique à toutes les lignes regroupées
 - Colonne REMARQUE : noter tout commentaire écrit dans cette colonne
+- CONDITIONNEMENT : si la feuille précise palette/caisse/colis/pièce (ex: "2 PAL", "5 colis", "1 caisse"), extraire ce mot dans le champ conditionnement. Si rien n'est précisé, mets null.
+- Si une même référence+lot apparaît sur plusieurs lignes avec des conditionnements DIFFÉRENTS (ex: 2 palettes ET 5 colis séparés), créer une ligne JSON distincte pour chaque conditionnement, ne pas les additionner.
 
 Retourne UNIQUEMENT un JSON valide :
-[{"reference": "35SO530E00067", "lot": "4500224268", "quantite": 1, "depot": "2", "rangee": "6", "remarque": null}, ...]
+[{"reference": "35SO530E00067", "lot": "4500224268", "quantite": 1, "conditionnement": null, "depot": "2", "rangee": "6", "remarque": null}, ...]
 Si valeur absente, mets null. Vérifie DEUX FOIS chaque quantité avant de répondre.${correctionsPrompt}`;
 
   try {
@@ -1852,6 +1883,7 @@ function renderImportTable() {
     tr.innerHTML = `
       <td><input type="text" value="${row.reference || ''}" onchange="importRows[${i}].reference=this.value" style="width:100%;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.82rem;font-family:monospace" /></td>
       <td><input type="text" value="${row.lot || ''}" onchange="importRows[${i}].lot=this.value" style="width:100%;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.82rem;font-family:monospace" /></td>
+      <td><input type="text" value="${row.conditionnement || ''}" onchange="importRows[${i}].conditionnement=this.value" style="width:90px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.8rem" placeholder="palette…" /></td>
       <td><input type="number" value="${row.quantite ?? 1}" min="1" onchange="importRows[${i}].quantite=parseFloat(this.value)" style="width:60px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.85rem" /></td>
       <td><input type="text" value="${row.depot || ''}" onchange="importRows[${i}].depot=this.value" style="width:70px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.85rem" /></td>
       <td><input type="text" value="${row.rangee || ''}" onchange="importRows[${i}].rangee=this.value" style="width:70px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.85rem" /></td>
@@ -1887,6 +1919,10 @@ function renderImportTable() {
             <input type="number" value="${row.quantite ?? 1}" min="1" onchange="importRows[${i}].quantite=parseFloat(this.value)" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" />
           </div>
         </div>
+        <div class="form-group" style="margin-bottom:.6rem">
+          <label>Conditionnement</label>
+          <input type="text" value="${row.conditionnement || ''}" onchange="importRows[${i}].conditionnement=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" placeholder="palette, caisse, colis…" />
+        </div>
         <div class="form-row">
           <div class="form-group" style="margin-bottom:.5rem">
             <label>Dépôt</label>
@@ -1913,7 +1949,7 @@ function syncImportTable() {
 }
 
 function addImportRow() {
-  importRows.push({ reference: '', lot: '', quantite: 1, depot: '', rangee: '' });
+  importRows.push({ reference: '', lot: '', conditionnement: '', quantite: 1, depot: '', rangee: '' });
   renderImportTable();
 }
 
@@ -1957,9 +1993,11 @@ async function validateImport() {
         }).eq('id', existing.id);
       }
     } else {
-      // Entrée — chercher par ref+lot (sans filtre dépôt pour éviter les doublons)
+      // Entrée — chercher par ref+lot+depot+conditionnement (clé d'unicité d'un emplacement de stock)
       let q = sb.from('stock').select('id, quantite').eq('reference', row.reference);
       q = row.lot ? q.eq('lot', row.lot) : q.is('lot', null);
+      q = row.depot ? q.eq('depot', row.depot) : q.is('depot', null);
+      q = row.conditionnement ? q.eq('conditionnement', row.conditionnement) : q.is('conditionnement', null);
       const { data: existingRows } = await q.limit(1);
       const existing = existingRows?.[0] || null;
 
@@ -1972,6 +2010,7 @@ async function validateImport() {
         await sb.from('stock').insert({
           reference: row.reference,
           lot: row.lot || null,
+          conditionnement: row.conditionnement || null,
           depot: row.depot || null,
           rangee: row.rangee || null,
           remarque: row.remarque || null,
