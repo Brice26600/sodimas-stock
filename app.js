@@ -656,18 +656,24 @@ async function saveEntree() {
   if (!depot) { toast('Le dépôt est obligatoire.', 'error'); return; }
   if (!qte || qte <= 0) { toast('La quantité doit être supérieure à 0.', 'error'); return; }
 
-  // Vérifier si la ligne existe déjà dans le stock (même ref + lot + dépôt + conditionnement)
-  let stockQuery = sb.from('stock').select('id, quantite').eq('reference', ref);
+  // Vérifier si la ligne existe déjà dans le stock (clé complète : ref+lot+depot+rangee+conditionnement)
+  let stockQuery = sb.from('stock').select('id, quantite, remarque').eq('reference', ref);
   stockQuery = lot ? stockQuery.eq('lot', lot) : stockQuery.is('lot', null);
   stockQuery = conditionnement ? stockQuery.eq('conditionnement', conditionnement) : stockQuery.is('conditionnement', null);
+  stockQuery = rangee ? stockQuery.eq('rangee', rangee) : stockQuery.is('rangee', null);
   const { data: existingRows } = await stockQuery.eq('depot', depot).limit(1);
   const existing = existingRows?.[0] || null;
 
   let stockError;
   if (existing) {
-    // Mettre à jour la quantité
+    // Cumuler la remarque si elle est nouvelle
+    let nouvelleRemarque = existing.remarque || null;
+    if (remarque && remarque !== existing.remarque) {
+      nouvelleRemarque = existing.remarque ? `${existing.remarque}\n${remarque}` : remarque;
+    }
     const { error } = await sb.from('stock').update({
       quantite: existing.quantite + qte,
+      remarque: nouvelleRemarque,
       updated_at: new Date().toISOString()
     }).eq('id', existing.id);
     stockError = error;
@@ -1319,23 +1325,12 @@ async function cloturerInventaire(invId) {
   for (const ligne of lignes || []) {
     if (!ligne.reference || ligne.quantite_reelle === null) continue;
 
-    // Chercher si la référence + lot + dépôt + conditionnement existe déjà en stock
-    let query = sb.from('stock').select('id').eq('reference', ligne.reference);
-    if (ligne.lot) {
-      query = query.eq('lot', ligne.lot);
-    } else {
-      query = query.is('lot', null);
-    }
-    if (ligne.depot) {
-      query = query.eq('depot', ligne.depot);
-    } else {
-      query = query.is('depot', null);
-    }
-    if (ligne.conditionnement) {
-      query = query.eq('conditionnement', ligne.conditionnement);
-    } else {
-      query = query.is('conditionnement', null);
-    }
+    // Clé d'unicité complète : ref+lot+depot+rangee+conditionnement
+    let query = sb.from('stock').select('id, remarque').eq('reference', ligne.reference);
+    query = ligne.lot ? query.eq('lot', ligne.lot) : query.is('lot', null);
+    query = ligne.depot ? query.eq('depot', ligne.depot) : query.is('depot', null);
+    query = ligne.rangee ? query.eq('rangee', ligne.rangee) : query.is('rangee', null);
+    query = ligne.conditionnement ? query.eq('conditionnement', ligne.conditionnement) : query.is('conditionnement', null);
     const { data: existingRows } = await query.limit(1);
     const existing = existingRows?.[0] || null;
 
@@ -1759,7 +1754,13 @@ function renderImportPhoto() {
         <div class="stock-card-view" id="ip-cards"></div>
       </div>
     </div>
+
+    <div class="card" style="margin-top:1rem">
+      <div class="card-header"><div class="card-title">Imports récents</div></div>
+      <div id="sessions-wrap">${spinner()}</div>
+    </div>
   `;
+  chargerSessionsImport();
 }
 
 async function onImportPhotoSelected(input) {
@@ -1961,21 +1962,30 @@ function removeImportRow(i) {
 async function validateImport() {
   if (!importRows.length) { toast('Aucune ligne à importer.', 'error'); return; }
 
+  const type = document.getElementById('ip-type').value;
+  const date = document.getElementById('ip-date').value;
+  const typeLabel = type === 'entree' ? 'ENTRÉE' : 'SORTIE';
+  const emoji = type === 'entree' ? '📥' : '📤';
+
+  const confirme = confirm(`${emoji} Confirmer l'import ?\n\n${importRows.length} ligne${importRows.length > 1 ? 's' : ''} en ${typeLabel}\nDate : ${date}\n\nVérifiez bien le type avant de valider.`);
+  if (!confirme) return;
+
   const btn = document.getElementById('ip-validate-btn');
   if (btn) {
     if (btn.disabled) return; // protection double-clic
     btn.disabled = true;
     btn.textContent = '⏳ Import en cours…';
   }
-
-  // Enregistrer les corrections
-  if (importRowsOriginal.length) {
-    await enregistrerCorrections(importRowsOriginal, importRows);
-  }
-
-  const type = document.getElementById('ip-type').value;
-  const date = document.getElementById('ip-date').value;
   const auteur = currentProfile?.prenom || currentUser?.email;
+
+  // Créer la session d'import
+  const { data: session } = await sb.from('sessions_import').insert({
+    type,
+    date_import: date,
+    nb_lignes: importRows.length,
+    auteur: currentProfile?.prenom || currentUser?.email
+  }).select().single();
+  const sessionId = session?.id || null;
 
   let ok = 0, errors = 0;
   for (const row of importRows) {
@@ -1993,17 +2003,26 @@ async function validateImport() {
         }).eq('id', existing.id);
       }
     } else {
-      // Entrée — chercher par ref+lot+depot+conditionnement (clé d'unicité d'un emplacement de stock)
-      let q = sb.from('stock').select('id, quantite').eq('reference', row.reference);
+      // Entrée — clé d'unicité complète : ref+lot+depot+rangee+conditionnement
+      let q = sb.from('stock').select('id, quantite, remarque').eq('reference', row.reference);
       q = row.lot ? q.eq('lot', row.lot) : q.is('lot', null);
       q = row.depot ? q.eq('depot', row.depot) : q.is('depot', null);
+      q = row.rangee ? q.eq('rangee', row.rangee) : q.is('rangee', null);
       q = row.conditionnement ? q.eq('conditionnement', row.conditionnement) : q.is('conditionnement', null);
       const { data: existingRows } = await q.limit(1);
       const existing = existingRows?.[0] || null;
 
       if (existing) {
+        // Cumuler la remarque si elle est nouvelle
+        let nouvelleRemarque = existing.remarque || null;
+        if (row.remarque && row.remarque !== existing.remarque) {
+          nouvelleRemarque = existing.remarque
+            ? `${existing.remarque}\n${row.remarque}`
+            : row.remarque;
+        }
         await sb.from('stock').update({
           quantite: existing.quantite + row.quantite,
+          remarque: nouvelleRemarque,
           updated_at: new Date().toISOString()
         }).eq('id', existing.id);
       } else {
@@ -2025,15 +2044,120 @@ async function validateImport() {
       reference: row.reference, lot: row.lot || null,
       depot: row.depot || null, rangee: row.rangee || null,
       quantite: row.quantite, auteur, source: 'import_photo',
-      remarque: row.remarque || 'Import par photo'
+      remarque: row.remarque || 'Import par photo',
+      session_id: sessionId
     });
     ok++;
+  }
+
+  // Mettre à jour le nb de lignes réelles importées
+  if (sessionId) {
+    await sb.from('sessions_import').update({ nb_lignes: ok }).eq('id', sessionId);
   }
 
   toast(`${ok} mouvement${ok > 1 ? 's' : ''} importé${ok > 1 ? 's' : ''} avec succès !`);
   importRows = [];
   importPhotoData = null;
   renderImportPhoto();
+}
+
+// ═══════════════════════════════════════ SESSIONS IMPORT ════
+
+async function chargerSessionsImport() {
+  const wrap = document.getElementById('sessions-wrap');
+  if (!wrap) return;
+
+  const { data: sessions } = await sb.from('sessions_import')
+    .select('*').order('created_at', { ascending: false }).limit(20);
+
+  if (!sessions?.length) {
+    wrap.innerHTML = emptyState('Aucun import enregistré.');
+    return;
+  }
+
+  wrap.innerHTML = `
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Date</th><th>Type</th><th>Lignes</th><th>Par</th><th>Statut</th><th></th></tr></thead>
+        <tbody>
+          ${sessions.map(s => `
+            <tr>
+              <td>${fmtDate(s.date_import)}</td>
+              <td><span class="badge badge-${s.type === 'entree' ? 'entree' : 'sortie'}">${s.type}</span></td>
+              <td class="td-qte">${s.nb_lignes}</td>
+              <td style="font-size:.82rem;color:var(--text-secondary)">${fmt(s.auteur)}</td>
+              <td>${s.annule ? '<span class="badge badge-sortie">Annulé</span>' : '<span class="badge badge-entree">Actif</span>'}</td>
+              <td>${!s.annule ? `<button class="btn-danger btn-sm" onclick="annulerImport('${s.id}','${s.type}')">Annuler</button>` : ''}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function annulerImport(sessionId, type) {
+  // Récupérer tous les mouvements de cette session
+  const { data: mouvements } = await sb.from('mouvements')
+    .select('*').eq('session_id', sessionId);
+
+  if (!mouvements?.length) { toast('Aucun mouvement trouvé pour cet import.', 'error'); return; }
+
+  // Vérifier si des mouvements ultérieurs ont touché ces références
+  const avertissements = [];
+  for (const m of mouvements) {
+    const { data: mouvUlterieurs } = await sb.from('mouvements')
+      .select('id, type_mouvement, date_mouvement')
+      .eq('reference', m.reference)
+      .gt('created_at', m.created_at)
+      .neq('session_id', sessionId)
+      .limit(1);
+
+    if (mouvUlterieurs?.length) {
+      avertissements.push(`${m.reference} / ${m.lot || 'sans lot'}`);
+    }
+  }
+
+  // Afficher avertissement si besoin
+  let confirme = false;
+  if (avertissements.length) {
+    const liste = [...new Set(avertissements)].slice(0, 5).join('\n- ');
+    confirme = confirm(`⚠️ Des mouvements ultérieurs ont touché ces références depuis cet import :\n- ${liste}\n\nL'annulation pourrait créer des incohérences de stock. Continuer quand même ?`);
+  } else {
+    confirme = confirm(`Annuler cet import de ${mouvements.length} ligne${mouvements.length > 1 ? 's' : ''} ? Le stock sera remis en état.`);
+  }
+
+  if (!confirme) return;
+
+  // Inverser les opérations sur le stock
+  for (const m of mouvements) {
+    let q = sb.from('stock').select('id, quantite').eq('reference', m.reference);
+    q = m.lot ? q.eq('lot', m.lot) : q.is('lot', null);
+    if (m.depot) q = q.eq('depot', m.depot);
+    if (m.rangee) q = q.eq('rangee', m.rangee);
+    const { data: rows } = await q.limit(1);
+    const stockRow = rows?.[0];
+
+    if (stockRow) {
+      const nouvelleQte = type === 'entree'
+        ? Math.max(0, stockRow.quantite - m.quantite) // annuler une entrée = soustraire
+        : stockRow.quantite + m.quantite;              // annuler une sortie = rajouter
+
+      await sb.from('stock').update({
+        quantite: nouvelleQte,
+        updated_at: new Date().toISOString()
+      }).eq('id', stockRow.id);
+    }
+  }
+
+  // Supprimer les mouvements et marquer la session comme annulée
+  await sb.from('mouvements').delete().eq('session_id', sessionId);
+  await sb.from('sessions_import').update({
+    annule: true, annule_at: new Date().toISOString()
+  }).eq('id', sessionId);
+
+  toast('Import annulé et stock remis en état.');
+  chargerSessionsImport();
 }
 
 // ═══════════════════════════════════════ BONS DE PRÉPARATION ════
@@ -2384,100 +2508,178 @@ async function genererPDF(bonId) {
 
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
+  const pageW = 210;
+  const margin = 14;
 
-  // En-tête
-  doc.setFontSize(20);
+  // ── En-tête ──────────────────────────────────────────────
+  // Bandeau titre
+  doc.setFillColor(30, 35, 51);
+  doc.rect(0, 0, pageW, 22, 'F');
+  doc.setTextColor(255);
+  doc.setFontSize(16);
   doc.setFont('helvetica', 'bold');
-  doc.text('BON DE LIVRAISON', 14, 20);
-
-  doc.setFontSize(11);
+  doc.text('BON DE PRÉPARATION', margin, 14);
+  doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
-  doc.text(`N° ${bon.numero_bl}`, 14, 30);
-  doc.text(`Date : ${fmtDate(bon.date_prevue)}`, 14, 37);
-  doc.text(`Destinataire : ${bon.destinataire}`, 14, 44);
+  doc.text(`SODIMAS — Mozart Distribution`, pageW - margin, 14, { align: 'right' });
 
+  // Infos bon
+  doc.setTextColor(0);
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`N° ${bon.numero_bl || '—'}`, margin, 32);
+  doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  doc.setTextColor(120);
-  doc.text('SODIMAS — Gestion de stock entrepôt (Mozart Distribution)', 14, 54);
+  doc.text(`Date de préparation : ${fmtDate(bon.date_prevue)}`, margin, 39);
+  doc.text(`Destinataire : ${bon.destinataire}`, margin, 46);
+  if (bon.remarque) doc.text(`Remarque : ${bon.remarque}`, margin, 53);
+
+  // Zone signatures
+  const sigY = 32;
+  doc.setFontSize(8.5);
+  doc.setTextColor(80);
+  doc.text('Préparé par :', pageW - 90, sigY);
+  doc.line(pageW - 90, sigY + 14, pageW - margin, sigY + 14);
+  doc.text('Contrôlé par :', pageW - 90, sigY + 20);
+  doc.line(pageW - 90, sigY + 34, pageW - margin, sigY + 34);
   doc.setTextColor(0);
 
-  // Tableau
-  let y = 65;
-  doc.setFillColor(30, 35, 51);
-  doc.setTextColor(255);
-  doc.rect(14, y, 182, 8, 'F');
-  doc.setFontSize(9);
-  doc.text('Référence', 17, y + 5.5);
-  doc.text('Lot', 65, y + 5.5);
-  doc.text('Dépôt', 102, y + 5.5);
-  doc.text('Rangée', 122, y + 5.5);
-  doc.text('Qté dem.', 145, y + 5.5);
-  doc.text('Statut', 168, y + 5.5);
+  // Ligne séparatrice
+  let y = bon.remarque ? 60 : 54;
+  doc.setDrawColor(200);
+  doc.line(margin, y, pageW - margin, y);
+  y += 6;
 
+  // ── En-tête tableau ──────────────────────────────────────
+  const cols = {
+    ref:     { x: margin,      w: 48, label: 'Référence' },
+    lot:     { x: margin + 48, w: 30, label: 'N° de lot' },
+    depot:   { x: margin + 78, w: 16, label: 'Dépôt' },
+    rangee:  { x: margin + 94, w: 28, label: 'Emplacement' },
+    qte:     { x: margin + 122,w: 14, label: 'Qté' },
+    remarque:{ x: margin + 136,w: 38, label: 'Remarque' },
+    statut:  { x: margin + 174,w: 22, label: 'Statut' },
+  };
+
+  doc.setFillColor(30, 35, 51);
+  doc.rect(margin, y, pageW - margin * 2, 8, 'F');
+  doc.setTextColor(255);
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'bold');
+  Object.values(cols).forEach(c => doc.text(c.label, c.x + 1, y + 5.5));
+  doc.setFont('helvetica', 'normal');
   doc.setTextColor(0);
   y += 8;
 
   let hasIndispo = false;
+  const rowH = 9;
 
   lignes?.forEach((l, i) => {
     const indispo = l.indisponible;
     if (indispo) hasIndispo = true;
 
-    if (i % 2 === 1) {
-      doc.setFillColor(245, 247, 250);
-      doc.rect(14, y, 182, 7, 'F');
-    }
+    // Fond alternance / indispo
     if (indispo) {
       doc.setFillColor(254, 226, 226);
-      doc.rect(14, y, 182, 7, 'F');
+      doc.rect(margin, y, pageW - margin * 2, rowH, 'F');
+    } else if (i % 2 === 1) {
+      doc.setFillColor(246, 248, 252);
+      doc.rect(margin, y, pageW - margin * 2, rowH, 'F');
     }
 
-    doc.setFontSize(9);
+    doc.setFontSize(8);
     doc.setTextColor(0);
-    doc.text(String(l.reference || ''), 17, y + 5);
-    doc.text(String(l.lot || '—'), 65, y + 5);
-    doc.text(String(l.depot || '—'), 102, y + 5);
-    doc.text(String(l.rangee || '—'), 122, y + 5);
-    doc.text(String(l.quantite), 148, y + 5);
 
+    // Référence (en gras)
+    doc.setFont('helvetica', 'bold');
+    doc.text(String(l.reference || ''), cols.ref.x + 1, y + 6);
+    doc.setFont('helvetica', 'normal');
+
+    // Lot (monospace-like, tronqué si besoin)
+    doc.setFontSize(7.5);
+    doc.text(String(l.lot || '—'), cols.lot.x + 1, y + 6);
+
+    // Dépôt
+    doc.setFontSize(8);
+    doc.text(String(l.depot || '—'), cols.depot.x + 1, y + 6);
+
+    // Emplacement (dépôt + rangée lisibles)
+    const emplacement = l.rangee ? String(l.rangee) : '—';
+    doc.text(emplacement, cols.rangee.x + 1, y + 6);
+
+    // Quantité (en gras, centré)
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text(String(l.quantite), cols.qte.x + cols.qte.w / 2, y + 6, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+
+    // Remarque (tronquée)
+    if (l.remarque) {
+      const rem = l.remarque.length > 22 ? l.remarque.slice(0, 20) + '…' : l.remarque;
+      doc.setTextColor(80);
+      doc.setFontSize(7.5);
+      doc.text(rem, cols.remarque.x + 1, y + 6);
+      doc.setTextColor(0);
+      doc.setFontSize(8);
+    }
+
+    // Statut
     if (indispo) {
       doc.setTextColor(200, 30, 30);
-      doc.setFontSize(8);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
       const qp = l.quantite_preparee || 0;
-      const label = qp > 0 ? `Préparé: ${qp}/${l.quantite}` : 'Non préparé';
-      doc.text(label, 168, y + 5);
+      doc.text(qp > 0 ? `${qp}/${l.quantite}` : 'INDISPO', cols.statut.x + 1, y + 6);
     } else {
       doc.setTextColor(20, 130, 60);
-      doc.text('OK', 168, y + 5);
+      doc.setFont('helvetica', 'bold');
+      doc.text('✓ OK', cols.statut.x + 1, y + 6);
     }
+    doc.setTextColor(0);
+    doc.setFont('helvetica', 'normal');
 
-    y += 7;
-    if (y > 270) { doc.addPage(); y = 20; }
+    // Ligne séparatrice légère
+    doc.setDrawColor(220);
+    doc.line(margin, y + rowH, pageW - margin, y + rowH);
+
+    y += rowH;
+    if (y > 272) {
+      doc.addPage();
+      y = 14;
+      // Répéter en-tête tableau sur nouvelle page
+      doc.setFillColor(30, 35, 51);
+      doc.rect(margin, y, pageW - margin * 2, 8, 'F');
+      doc.setTextColor(255);
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'bold');
+      Object.values(cols).forEach(c => doc.text(c.label, c.x + 1, y + 5.5));
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(0);
+      y += 8;
+    }
   });
 
   doc.setTextColor(0);
 
-  // Note explicative si des lignes sont indisponibles
+  // Note indispo
   if (hasIndispo) {
-    y += 8;
-    if (y > 260) { doc.addPage(); y = 20; }
-    doc.setFontSize(9);
+    y += 6;
+    if (y > 265) { doc.addPage(); y = 14; }
+    doc.setFontSize(8.5);
     doc.setTextColor(200, 30, 30);
     doc.setFont('helvetica', 'bold');
-    doc.text('⚠ Certains articles n\'ont pas pu être préparés intégralement', 14, y);
+    doc.text('⚠ Certains articles n\'ont pas pu être préparés intégralement (stock insuffisant).', margin, y);
     doc.setFont('helvetica', 'normal');
-    y += 6;
-    doc.setFontSize(8.5);
-    doc.text('en raison d\'un stock insuffisant ou nul au moment de la préparation.', 14, y);
     doc.setTextColor(0);
   }
 
   // Pied de page
-  y += 15;
-  if (y > 250) { doc.addPage(); y = 20; }
-  doc.setFontSize(9);
-  doc.setTextColor(120);
-  doc.text(`Document généré le ${new Date().toLocaleDateString('fr-FR')} par ${bon.created_by || ''}`, 14, y);
+  y += 10;
+  if (y > 270) { doc.addPage(); y = 14; }
+  doc.setFontSize(7.5);
+  doc.setTextColor(150);
+  doc.text(`Document généré le ${new Date().toLocaleDateString('fr-FR')} par ${bon.created_by || ''}  —  SODIMAS / Mozart Distribution`, margin, y);
 
-  doc.save(`${bon.numero_bl || 'bon'}_${bon.destinataire.replace(/\s+/g,'_')}.pdf`);
+  doc.save(`${bon.numero_bl || 'bon'}_${bon.destinataire.replace(/\s+/g, '_')}.pdf`);
 }
