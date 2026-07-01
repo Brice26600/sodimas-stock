@@ -1,3 +1,4 @@
+// version beta
 // ═══════════════════════════════════════ CONFIG ═══
 const SUPABASE_URL = 'https://quoriworrayfkxdwzhie.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF1b3Jpd29ycmF5Zmt4ZHd6aGllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwMTYzMTEsImV4cCI6MjA5NjU5MjMxMX0.LJaiD274vSfiGtRtqeFka7dNtqig3gDOjw6j-pjey6M';
