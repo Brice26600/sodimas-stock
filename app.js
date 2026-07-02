@@ -1,4 +1,3 @@
-// version beta
 // ═══════════════════════════════════════ CONFIG ═══
 const SUPABASE_URL = 'https://quoriworrayfkxdwzhie.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF1b3Jpd29ycmF5Zmt4ZHd6aGllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwMTYzMTEsImV4cCI6MjA5NjU5MjMxMX0.LJaiD274vSfiGtRtqeFka7dNtqig3gDOjw6j-pjey6M';
@@ -630,7 +629,7 @@ async function renderEntree() {
       <div class="form-group"><label>Remarque</label>
         <textarea id="e-remarque" placeholder="Informations complémentaires…"></textarea></div>
       <div class="form-actions">
-        <button class="btn-success" onclick="saveEntree()">✓ Enregistrer l'entrée</button>
+        <button class="btn-success" id="e-save-btn" onclick="saveEntree()">✓ Enregistrer l'entrée</button>
         <button class="btn-secondary" onclick="resetEntreeForm()">Réinitialiser</button>
       </div>
     </div>
@@ -643,6 +642,12 @@ async function renderEntree() {
 }
 
 async function saveEntree() {
+  const saveBtn = document.getElementById('e-save-btn');
+  if (saveBtn) {
+    if (saveBtn.disabled) return;
+    saveBtn.disabled = true;
+    saveBtn.textContent = '⏳ Enregistrement…';
+  }
   const ref = document.getElementById('e-ref').value.trim();
   const lot = document.getElementById('e-lot').value.trim();
   const conditionnement = document.getElementById('e-conditionnement').value.trim();
@@ -688,7 +693,11 @@ async function saveEntree() {
     stockError = error;
   }
 
-  if (stockError) { toast('Erreur stock : ' + stockError.message, 'error'); return; }
+  if (stockError) {
+    toast('Erreur stock : ' + stockError.message, 'error');
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '✓ Enregistrer l\'entrée'; }
+    return;
+  }
 
   // Enregistrer le mouvement
   await sb.from('mouvements').insert({
@@ -701,6 +710,7 @@ async function saveEntree() {
   });
 
   toast(`Entrée enregistrée : ${qte} × ${ref}`);
+  if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '✓ Enregistrer l\'entrée'; }
   resetEntreeForm();
 }
 
@@ -806,9 +816,14 @@ async function saveSortie() {
   const r = selectedStockRow;
 
   if (!qte || qte <= 0) { toast('Quantité invalide.', 'error'); return; }
-  if (qte > r.quantite) { toast(`Stock insuffisant (dispo : ${r.quantite}).`, 'error'); return; }
 
-  const newQte = r.quantite - qte;
+  // Si stock insuffisant, proposer une sortie forcée
+  if (qte > r.quantite) {
+    const forcer = confirm(`⚠️ Stock insuffisant — le système indique ${r.quantite} unité${r.quantite > 1 ? 's' : ''} disponible${r.quantite > 1 ? 's' : ''}.\n\nVoulez-vous forcer la sortie de ${qte} unités quand même ?\n(Le stock passera en négatif — écart à régulariser)`);
+    if (!forcer) return;
+  }
+
+  const newQte = r.quantite - qte; // peut être négatif
   const { error } = await sb.from('stock').update({
     quantite: newQte, updated_at: new Date().toISOString()
   }).eq('id', r.id);
@@ -2098,7 +2113,6 @@ async function chargerSessionsImport() {
 }
 
 async function annulerImport(sessionId, type) {
-  // Récupérer tous les mouvements de cette session
   const { data: mouvements } = await sb.from('mouvements')
     .select('*').eq('session_id', sessionId);
 
@@ -2106,31 +2120,35 @@ async function annulerImport(sessionId, type) {
 
   // Vérifier si des mouvements ultérieurs ont touché ces références
   const avertissements = [];
-  for (const m of mouvements) {
-    const { data: mouvUlterieurs } = await sb.from('mouvements')
-      .select('id, type_mouvement, date_mouvement')
-      .eq('reference', m.reference)
-      .gt('created_at', m.created_at)
-      .neq('session_id', sessionId)
-      .limit(1);
+  const refLots = [...new Set(mouvements.map(m => `${m.reference}__${m.lot || ''}`))];
+
+  for (const refLot of refLots) {
+    const [ref, lot] = refLot.split('__');
+    const dernierMouv = mouvements.filter(m => m.reference === ref && (m.lot || '') === lot)
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+
+    let q = sb.from('mouvements').select('id')
+      .eq('reference', ref)
+      .gt('created_at', dernierMouv.created_at);
+    // Exclure les mouvements de cette session
+    const { data: mouvUlterieurs } = await q.limit(1);
 
     if (mouvUlterieurs?.length) {
-      avertissements.push(`${m.reference} / ${m.lot || 'sans lot'}`);
+      avertissements.push(`${ref} / ${lot || 'sans lot'}`);
     }
   }
 
-  // Afficher avertissement si besoin
   let confirme = false;
   if (avertissements.length) {
     const liste = [...new Set(avertissements)].slice(0, 5).join('\n- ');
-    confirme = confirm(`⚠️ Des mouvements ultérieurs ont touché ces références depuis cet import :\n- ${liste}\n\nL'annulation pourrait créer des incohérences de stock. Continuer quand même ?`);
+    confirme = confirm(`⚠️ Des mouvements ultérieurs ont touché ces références depuis cet import :\n- ${liste}\n\nL'annulation pourrait créer des incohérences de stock (stock négatif possible). Continuer quand même ?`);
   } else {
     confirme = confirm(`Annuler cet import de ${mouvements.length} ligne${mouvements.length > 1 ? 's' : ''} ? Le stock sera remis en état.`);
   }
 
   if (!confirme) return;
 
-  // Inverser les opérations sur le stock
+  // Inverser les opérations sur le stock (sans limiter à 0 — stock négatif possible)
   for (const m of mouvements) {
     let q = sb.from('stock').select('id, quantite').eq('reference', m.reference);
     q = m.lot ? q.eq('lot', m.lot) : q.is('lot', null);
@@ -2141,8 +2159,8 @@ async function annulerImport(sessionId, type) {
 
     if (stockRow) {
       const nouvelleQte = type === 'entree'
-        ? Math.max(0, stockRow.quantite - m.quantite) // annuler une entrée = soustraire
-        : stockRow.quantite + m.quantite;              // annuler une sortie = rajouter
+        ? stockRow.quantite - m.quantite  // annuler entrée = soustraire (peut être négatif)
+        : stockRow.quantite + m.quantite; // annuler sortie = rajouter
 
       await sb.from('stock').update({
         quantite: nouvelleQte,
@@ -2151,7 +2169,6 @@ async function annulerImport(sessionId, type) {
     }
   }
 
-  // Supprimer les mouvements et marquer la session comme annulée
   await sb.from('mouvements').delete().eq('session_id', sessionId);
   await sb.from('sessions_import').update({
     annule: true, annule_at: new Date().toISOString()
@@ -2239,11 +2256,21 @@ async function openBon(bonId) {
   const { data: bon } = await sb.from('bons_preparation').select('*').eq('id', bonId).single();
   const { data: lignes } = await sb.from('bon_lignes').select('*').eq('bon_id', bonId).order('created_at');
 
-  // Vérifier la disponibilité pour chaque ligne
+  // Vérifier la disponibilité pour chaque ligne via stock_id
   const lignesAvecDispo = await Promise.all((lignes || []).map(async l => {
-    const { data: stockRow } = await sb.from('stock').select('quantite, quantite_reservee')
-      .eq('reference', l.reference)
-      .maybeSingle();
+    let stockRow = null;
+    if (l.stock_id) {
+      const { data } = await sb.from('stock').select('quantite, quantite_reservee').eq('id', l.stock_id).maybeSingle();
+      stockRow = data;
+    } else {
+      // Fallback : chercher par ref+lot+depot+rangee
+      let q = sb.from('stock').select('quantite, quantite_reservee').eq('reference', l.reference);
+      if (l.lot) q = q.eq('lot', l.lot); else q = q.is('lot', null);
+      if (l.depot) q = q.eq('depot', l.depot);
+      if (l.rangee) q = q.eq('rangee', l.rangee);
+      const { data } = await q.maybeSingle();
+      stockRow = data;
+    }
     const dispo = stockRow ? stockRow.quantite - (stockRow.quantite_reservee || 0) + l.quantite : -1;
     return { ...l, stockExiste: !!stockRow, qteDispo: stockRow ? stockRow.quantite : 0 };
   }));
@@ -2519,10 +2546,10 @@ async function genererPDF(bonId) {
   doc.setTextColor(255);
   doc.setFontSize(16);
   doc.setFont('helvetica', 'bold');
-  doc.text('BON DE PRÉPARATION', margin, 14);
+  doc.text('BON DE PREPARATION', margin, 14);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
-  doc.text(`SODIMAS — Mozart Distribution`, pageW - margin, 14, { align: 'right' });
+  doc.text(`SODIMAS - Mozart Distribution`, pageW - margin, 14, { align: 'right' });
 
   // Infos bon
   doc.setTextColor(0);
@@ -2553,11 +2580,11 @@ async function genererPDF(bonId) {
 
   // ── En-tête tableau ──────────────────────────────────────
   const cols = {
-    ref:     { x: margin,      w: 48, label: 'Référence' },
-    lot:     { x: margin + 48, w: 30, label: 'N° de lot' },
-    depot:   { x: margin + 78, w: 16, label: 'Dépôt' },
+    ref:     { x: margin,      w: 48, label: 'Reference' },
+    lot:     { x: margin + 48, w: 30, label: 'No de lot' },
+    depot:   { x: margin + 78, w: 16, label: 'Depot' },
     rangee:  { x: margin + 94, w: 28, label: 'Emplacement' },
-    qte:     { x: margin + 122,w: 14, label: 'Qté' },
+    qte:     { x: margin + 122,w: 14, label: 'Qte' },
     remarque:{ x: margin + 136,w: 38, label: 'Remarque' },
     statut:  { x: margin + 174,w: 22, label: 'Statut' },
   };
@@ -2670,7 +2697,7 @@ async function genererPDF(bonId) {
     doc.setFontSize(8.5);
     doc.setTextColor(200, 30, 30);
     doc.setFont('helvetica', 'bold');
-    doc.text('⚠ Certains articles n\'ont pas pu être préparés intégralement (stock insuffisant).', margin, y);
+    doc.text('! Certains articles n\'ont pas pu etre prepares integralement (stock insuffisant).', margin, y);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(0);
   }
@@ -2680,7 +2707,7 @@ async function genererPDF(bonId) {
   if (y > 270) { doc.addPage(); y = 14; }
   doc.setFontSize(7.5);
   doc.setTextColor(150);
-  doc.text(`Document généré le ${new Date().toLocaleDateString('fr-FR')} par ${bon.created_by || ''}  —  SODIMAS / Mozart Distribution`, margin, y);
+  doc.text(`Document genere le ${new Date().toLocaleDateString('fr-FR')} par ${bon.created_by || ''}  -  SODIMAS / Mozart Distribution`, margin, y);
 
   doc.save(`${bon.numero_bl || 'bon'}_${bon.destinataire.replace(/\s+/g, '_')}.pdf`);
 }
