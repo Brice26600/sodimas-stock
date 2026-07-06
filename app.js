@@ -2659,13 +2659,14 @@ async function genererPDF(bonId) {
 
   // ── En-tête tableau ──────────────────────────────────────
   const cols = {
-    ref:     { x: margin,      w: 48, label: 'Reference' },
-    lot:     { x: margin + 48, w: 30, label: 'No de lot' },
-    depot:   { x: margin + 78, w: 16, label: 'Depot' },
-    rangee:  { x: margin + 94, w: 28, label: 'Emplacement' },
-    qte:     { x: margin + 122,w: 14, label: 'Qte' },
-    remarque:{ x: margin + 136,w: 38, label: 'Remarque' },
-    statut:  { x: margin + 174,w: 22, label: 'Statut' },
+    ref:      { x: margin,       w: 45, label: 'Reference' },
+    lot:      { x: margin + 45,  w: 28, label: 'No de lot' },
+    cond:     { x: margin + 73,  w: 18, label: 'Cond.' },
+    depot:    { x: margin + 91,  w: 14, label: 'Depot' },
+    rangee:   { x: margin + 105, w: 22, label: 'Rangee' },
+    remarque: { x: margin + 127, w: 33, label: 'Remarque' },
+    qte:      { x: margin + 160, w: 12, label: 'Qte' },
+    statut:   { x: margin + 172, w: 24, label: 'Statut' },
   };
 
   doc.setFillColor(30, 35, 51);
@@ -2702,9 +2703,12 @@ async function genererPDF(bonId) {
     doc.text(String(l.reference || ''), cols.ref.x + 1, y + 6);
     doc.setFont('helvetica', 'normal');
 
-    // Lot (monospace-like, tronqué si besoin)
+    // Lot
     doc.setFontSize(7.5);
     doc.text(String(l.lot || '—'), cols.lot.x + 1, y + 6);
+
+    // Conditionnement
+    doc.text(String(l.conditionnement || '—'), cols.cond.x + 1, y + 6);
 
     // Dépôt
     doc.setFontSize(8);
