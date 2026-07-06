@@ -2659,14 +2659,14 @@ async function genererPDF(bonId) {
 
   // ── En-tête tableau ──────────────────────────────────────
   const cols = {
-    ref:      { x: margin,       w: 45, label: 'Reference' },
-    lot:      { x: margin + 45,  w: 28, label: 'No de lot' },
-    cond:     { x: margin + 73,  w: 18, label: 'Cond.' },
-    depot:    { x: margin + 91,  w: 14, label: 'Depot' },
-    rangee:   { x: margin + 105, w: 22, label: 'Rangee' },
-    remarque: { x: margin + 127, w: 33, label: 'Remarque' },
-    qte:      { x: margin + 160, w: 12, label: 'Qte' },
-    statut:   { x: margin + 172, w: 24, label: 'Statut' },
+    ref:      { x: margin,       w: 42, label: 'Reference' },
+    lot:      { x: margin + 42,  w: 28, label: 'No de lot' },
+    cond:     { x: margin + 70,  w: 16, label: 'Cond.' },
+    depot:    { x: margin + 86,  w: 14, label: 'Depot' },
+    rangee:   { x: margin + 100, w: 20, label: 'Rangee' },
+    remarque: { x: margin + 120, w: 36, label: 'Remarque' },
+    qte:      { x: margin + 156, w: 12, label: 'Qte' },
+    statut:   { x: margin + 168, w: 28, label: 'Statut' },
   };
 
   doc.setFillColor(30, 35, 51);
