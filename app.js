@@ -2383,16 +2383,20 @@ async function deleteBon(bonId, wasValidated) {
       const { data: stockRow } = await sb.from('stock').select('quantite, quantite_reservee').eq('id', l.stock_id).single();
       if (stockRow) {
         if (wasValidated) {
-          // Restaurer la quantité déduite (elle n'est plus réservée car déjà validée)
-          await sb.from('stock').update({
-            quantite: stockRow.quantite + l.quantite,
-            updated_at: new Date().toISOString()
-          }).eq('id', l.stock_id);
+          // Ne restaurer que si la ligne était disponible (indisponible = stock jamais déduit)
+          if (!l.indisponible) {
+            await sb.from('stock').update({
+              quantite: stockRow.quantite + l.quantite,
+              updated_at: new Date().toISOString()
+            }).eq('id', l.stock_id);
+          }
         } else {
-          // Juste libérer la réservation
-          await sb.from('stock').update({
-            quantite_reservee: Math.max(0, (stockRow.quantite_reservee || 0) - l.quantite)
-          }).eq('id', l.stock_id);
+          // Libérer la réservation seulement si la ligne n'était pas indisponible
+          if (!l.indisponible) {
+            await sb.from('stock').update({
+              quantite_reservee: Math.max(0, (stockRow.quantite_reservee || 0) - l.quantite)
+            }).eq('id', l.stock_id);
+          }
         }
       }
     }
@@ -2645,9 +2649,9 @@ async function genererPDF(bonId) {
   const sigY = 32;
   doc.setFontSize(8.5);
   doc.setTextColor(80);
-  doc.text('Préparé par :', pageW - 90, sigY);
+  doc.text('Prepare par :', pageW - 90, sigY);
   doc.line(pageW - 90, sigY + 14, pageW - margin, sigY + 14);
-  doc.text('Contrôlé par :', pageW - 90, sigY + 20);
+  doc.text('Controle par :', pageW - 90, sigY + 20);
   doc.line(pageW - 90, sigY + 34, pageW - margin, sigY + 34);
   doc.setTextColor(0);
 
