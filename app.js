@@ -2422,7 +2422,6 @@ async function searchStockForBon(bonId) {
   bonSearchDebounce = setTimeout(async () => {
     const { data } = await sb.from('stock').select('*')
       .or(`reference.ilike.%${q}%,lot.ilike.%${q}%,depot.ilike.%${q}%,rangee.ilike.%${q}%,remarque.ilike.%${q}%,conditionnement.ilike.%${q}%`)
-      .gt('quantite', 0)
       .order('reference').limit(15);
 
     if (!data?.length) {
