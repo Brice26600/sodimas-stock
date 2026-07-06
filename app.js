@@ -2287,6 +2287,7 @@ async function openBon(bonId) {
       </h2>
       <span style="font-size:.85rem;color:var(--text-secondary)">${fmtDate(bon.date_prevue)}</span>
       ${isEnCours ? `
+        <button class="btn-secondary" onclick="imprimerBon('${bonId}')">🖨 Imprimer le bon</button>
         <button class="btn-success" onclick="validerBon('${bonId}')">✓ Valider → BL</button>
         <button class="btn-danger btn-sm" onclick="deleteBon('${bonId}', false)">🗑</button>
       ` : `
@@ -2611,6 +2612,139 @@ async function validerBon(bonId) {
 
   toast(`Bon validé ! ${numeroBL}`);
   openBon(bonId);
+}
+
+async function imprimerBon(bonId) {
+  const { data: bon } = await sb.from('bons_preparation').select('*').eq('id', bonId).single();
+  const { data: lignes } = await sb.from('bon_lignes').select('*').eq('bon_id', bonId).order('created_at');
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const pageW = 210;
+  const margin = 14;
+
+  // Bandeau titre
+  doc.setFillColor(30, 35, 51);
+  doc.rect(0, 0, pageW, 22, 'F');
+  doc.setTextColor(255);
+  doc.setFontSize(16);
+  doc.setFont('helvetica', 'bold');
+  doc.text('BON DE PREPARATION', margin, 14);
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.text('SODIMAS - Mozart Distribution', pageW - margin, 14, { align: 'right' });
+
+  // Infos bon
+  doc.setTextColor(0);
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`BON EN COURS - A valider apres preparation`, margin, 32);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.text(`Date de preparation : ${fmtDate(bon.date_prevue)}`, margin, 39);
+  doc.text(`Destinataire : ${bon.destinataire}`, margin, 46);
+  if (bon.remarque) doc.text(`Remarque : ${bon.remarque}`, margin, 53);
+
+  // Zone signatures
+  const sigY = 32;
+  doc.setFontSize(8.5);
+  doc.setTextColor(80);
+  doc.text('Prepare par :', pageW - 90, sigY);
+  doc.line(pageW - 90, sigY + 14, pageW - margin, sigY + 14);
+  doc.text('Controle par :', pageW - 90, sigY + 20);
+  doc.line(pageW - 90, sigY + 34, pageW - margin, sigY + 34);
+  doc.setTextColor(0);
+
+  let y = bon.remarque ? 60 : 54;
+  doc.setDrawColor(200);
+  doc.line(margin, y, pageW - margin, y);
+  y += 6;
+
+  // En-tête tableau
+  const cols = {
+    ref:      { x: margin,       w: 42, label: 'Reference' },
+    lot:      { x: margin + 42,  w: 28, label: 'No de lot' },
+    cond:     { x: margin + 70,  w: 16, label: 'Cond.' },
+    depot:    { x: margin + 86,  w: 14, label: 'Depot' },
+    rangee:   { x: margin + 100, w: 20, label: 'Rangee' },
+    remarque: { x: margin + 120, w: 36, label: 'Remarque' },
+    qte:      { x: margin + 156, w: 12, label: 'Qte' },
+    statut:   { x: margin + 168, w: 28, label: 'Statut' },
+  };
+
+  doc.setFillColor(30, 35, 51);
+  doc.rect(margin, y, pageW - margin * 2, 8, 'F');
+  doc.setTextColor(255);
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'bold');
+  Object.values(cols).forEach(c => doc.text(c.label, c.x + 1, y + 5.5));
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(0);
+  y += 8;
+
+  const rowH = 9;
+  lignes?.forEach((l, i) => {
+    if (i % 2 === 1) {
+      doc.setFillColor(246, 248, 252);
+      doc.rect(margin, y, pageW - margin * 2, rowH, 'F');
+    }
+
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.text(String(l.reference || ''), cols.ref.x + 1, y + 6);
+    doc.setFont('helvetica', 'normal');
+
+    doc.setFontSize(7.5);
+    doc.text(String(l.lot || '—'), cols.lot.x + 1, y + 6);
+    doc.text(String(l.conditionnement || '—'), cols.cond.x + 1, y + 6);
+
+    doc.setFontSize(8);
+    doc.text(String(l.depot || '—'), cols.depot.x + 1, y + 6);
+    doc.text(String(l.rangee || '—'), cols.rangee.x + 1, y + 6);
+
+    if (l.remarque) {
+      const rem = l.remarque.length > 22 ? l.remarque.slice(0, 20) + '...' : l.remarque;
+      doc.setTextColor(80);
+      doc.setFontSize(7.5);
+      doc.text(rem, cols.remarque.x + 1, y + 6);
+      doc.setTextColor(0);
+      doc.setFontSize(8);
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text(String(l.quantite), cols.qte.x + cols.qte.w / 2, y + 6, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+
+    // Case à cocher pour Matthias
+    doc.setDrawColor(100);
+    doc.rect(cols.statut.x + 1, y + 2, 6, 6);
+    doc.setDrawColor(200);
+
+    doc.line(margin, y + rowH, pageW - margin, y + rowH);
+    y += rowH;
+    if (y > 272) {
+      doc.addPage();
+      y = 14;
+      doc.setFillColor(30, 35, 51);
+      doc.rect(margin, y, pageW - margin * 2, 8, 'F');
+      doc.setTextColor(255);
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'bold');
+      Object.values(cols).forEach(c => doc.text(c.label, c.x + 1, y + 5.5));
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(0);
+      y += 8;
+    }
+  });
+
+  doc.setFontSize(7.5);
+  doc.setTextColor(150);
+  y += 10;
+  doc.text(`Bon de preparation provisoire - ${new Date().toLocaleDateString('fr-FR')} - SODIMAS / Mozart Distribution`, margin, y);
+
+  doc.save(`BON_PREP_${bon.destinataire.replace(/\s+/g,'_')}_${bon.date_prevue}.pdf`);
 }
 
 async function genererPDF(bonId) {
