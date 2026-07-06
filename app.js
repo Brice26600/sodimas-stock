@@ -2256,14 +2256,12 @@ async function openBon(bonId) {
   const { data: bon } = await sb.from('bons_preparation').select('*').eq('id', bonId).single();
   const { data: lignes } = await sb.from('bon_lignes').select('*').eq('bon_id', bonId).order('created_at');
 
-  // Vérifier la disponibilité pour chaque ligne via stock_id
   const lignesAvecDispo = await Promise.all((lignes || []).map(async l => {
     let stockRow = null;
     if (l.stock_id) {
       const { data } = await sb.from('stock').select('quantite, quantite_reservee').eq('id', l.stock_id).maybeSingle();
       stockRow = data;
     } else {
-      // Fallback : chercher par ref+lot+depot+rangee
       let q = sb.from('stock').select('quantite, quantite_reservee').eq('reference', l.reference);
       if (l.lot) q = q.eq('lot', l.lot); else q = q.is('lot', null);
       if (l.depot) q = q.eq('depot', l.depot);
@@ -2271,64 +2269,106 @@ async function openBon(bonId) {
       const { data } = await q.maybeSingle();
       stockRow = data;
     }
-    const dispo = stockRow ? stockRow.quantite - (stockRow.quantite_reservee || 0) + l.quantite : -1;
     return { ...l, stockExiste: !!stockRow, qteDispo: stockRow ? stockRow.quantite : 0 };
   }));
 
   const isEnCours = bon.statut === 'en_cours';
+  const el = document.getElementById('page-bons');
 
-  openModal(`Bon — ${fmtDate(bon.date_prevue)} → ${bon.destinataire}`, `
-    <div style="margin-bottom:1rem">
-      <span class="badge ${bon.statut === 'valide' ? 'badge-entree' : 'badge-deplacement'}">${bon.statut === 'valide' ? 'Validé' : 'En cours'}</span>
-      ${bon.numero_bl ? `<span style="margin-left:.6rem;font-family:monospace;font-size:.85rem;color:var(--text-secondary)">${bon.numero_bl}</span>` : ''}
-      ${bon.remarque ? `<p style="font-size:.85rem;color:var(--text-secondary);margin-top:.5rem">${bon.remarque}</p>` : ''}
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;gap:.8rem;margin-bottom:1rem;flex-wrap:wrap">
+      <button class="btn-secondary btn-sm" onclick="renderBons()">← Retour</button>
+      <h2 style="font-size:1rem;font-weight:600;flex:1">
+        ${bon.destinataire}
+        <span class="badge ${bon.statut === 'valide' ? 'badge-entree' : 'badge-deplacement'}" style="margin-left:.5rem">
+          ${bon.statut === 'valide' ? 'Validé' : 'En cours'}
+        </span>
+        ${bon.numero_bl ? `<span style="margin-left:.5rem;font-family:monospace;font-size:.85rem;color:var(--text-secondary)">${bon.numero_bl}</span>` : ''}
+      </h2>
+      <span style="font-size:.85rem;color:var(--text-secondary)">${fmtDate(bon.date_prevue)}</span>
+      ${isEnCours ? `
+        <button class="btn-success" onclick="validerBon('${bonId}')">✓ Valider → BL</button>
+        <button class="btn-danger btn-sm" onclick="deleteBon('${bonId}', false)">🗑</button>
+      ` : `
+        <button class="btn-primary" onclick="genererPDF('${bonId}')">📄 Télécharger le BL</button>
+        <button class="btn-danger btn-sm" onclick="deleteBon('${bonId}', true)">🗑 Annuler le BL</button>
+      `}
     </div>
 
-    <div class="table-wrapper">
-      <table>
-        <thead><tr><th>Référence</th><th>Lot</th><th>Dépôt</th><th>Rangée</th><th>Qté</th><th>Statut</th>${isEnCours ? '<th></th>' : ''}</tr></thead>
-        <tbody>
-          ${lignesAvecDispo.length ? lignesAvecDispo.map(l => `
-            <tr>
-              <td class="td-ref">${l.reference}</td>
-              <td class="td-lot">${fmt(l.lot)}</td>
-              <td>${badgeDepot(l.depot)}</td>
-              <td>${fmt(l.rangee)}</td>
-              <td class="td-qte">${l.quantite}</td>
-              <td>${isEnCours
+    ${bon.remarque ? `<p style="font-size:.85rem;color:var(--text-secondary);margin-bottom:.8rem">${bon.remarque}</p>` : ''}
+
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-header"><div class="card-title">Lignes du bon — ${lignesAvecDispo.length} article${lignesAvecDispo.length > 1 ? 's' : ''}</div></div>
+      ${lignesAvecDispo.length ? `
+        <!-- Vue tableau desktop -->
+        <div class="table-wrapper stock-table-view">
+          <table>
+            <thead><tr>
+              <th>Référence</th><th>Lot</th><th>Cond.</th><th>Dépôt</th><th>Rangée</th>
+              <th>Remarque</th><th>Qté</th><th>Statut</th>${isEnCours ? '<th></th>' : ''}
+            </tr></thead>
+            <tbody>
+              ${lignesAvecDispo.map(l => `
+                <tr>
+                  <td class="td-ref">${l.reference}</td>
+                  <td class="td-lot">${fmt(l.lot)}</td>
+                  <td style="font-size:.78rem;color:var(--text-secondary)">${fmt(l.conditionnement)}</td>
+                  <td>${badgeDepot(l.depot)}</td>
+                  <td>${fmt(l.rangee)}</td>
+                  <td style="font-size:.78rem;color:var(--text-secondary);max-width:120px">${fmt(l.remarque)}</td>
+                  <td style="font-size:1rem;font-weight:700;color:var(--accent);text-align:center">${l.quantite}</td>
+                  <td>${isEnCours
+                    ? (!l.stockExiste || l.qteDispo < l.quantite
+                        ? `<span class="badge badge-sortie">⚠ Indispo</span>`
+                        : `<span class="badge badge-entree">OK</span>`)
+                    : (l.indisponible
+                        ? `<span class="badge badge-sortie">⚠ ${(l.quantite_preparee || 0) > 0 ? `${l.quantite_preparee}/${l.quantite}` : 'Indispo'}</span>`
+                        : `<span class="badge badge-entree">OK</span>`)}</td>
+                  ${isEnCours ? `<td><button class="btn-danger btn-sm" onclick="removeBonLigne('${l.id}','${bonId}')">✕</button></td>` : ''}
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        <!-- Vue cartes mobile -->
+        <div class="stock-card-view">
+          ${lignesAvecDispo.map(l => `
+            <div class="import-card">
+              <div class="import-card-header">
+                <span style="font-weight:600;font-size:.9rem">${l.reference}</span>
+                ${isEnCours ? `<button class="btn-danger btn-sm" onclick="removeBonLigne('${l.id}','${bonId}')">✕</button>` : ''}
+              </div>
+              <div style="font-size:.82rem;color:var(--text-secondary);margin-bottom:.3rem">
+                ${l.lot ? `Lot : ${l.lot}` : ''}
+                ${l.conditionnement ? ` · ${l.conditionnement}` : ''}
+                ${l.depot ? ` · ${l.depot}` : ''}${l.rangee ? ` / ${l.rangee}` : ''}
+              </div>
+              ${l.remarque ? `<div style="font-size:.78rem;color:var(--text-secondary);margin-bottom:.3rem">${l.remarque}</div>` : ''}
+              <div style="display:flex;align-items:center;gap:.8rem">
+                <span style="font-size:1.2rem;font-weight:700;color:var(--accent)">${l.quantite}</span>
+                ${isEnCours
                   ? (!l.stockExiste || l.qteDispo < l.quantite
-                      ? `<span class="badge badge-sortie">⚠️ Indisponible</span>`
+                      ? `<span class="badge badge-sortie">⚠ Indispo</span>`
                       : `<span class="badge badge-entree">OK</span>`)
-                  : (l.indisponible
-                      ? `<span class="badge badge-sortie">⚠️ ${(l.quantite_preparee || 0) > 0 ? `Préparé ${l.quantite_preparee}/${l.quantite}` : 'Non préparé'}</span>`
-                      : `<span class="badge badge-entree">OK</span>`)}</td>
-              ${isEnCours ? `<td><button class="btn-danger btn-sm" onclick="removeBonLigne('${l.id}','${bonId}')">✕</button></td>` : ''}
-            </tr>
-          `).join('') : `<tr><td colspan="${isEnCours ? 7 : 6}" style="text-align:center;color:var(--text-secondary)">Aucune ligne</td></tr>`}
-        </tbody>
-      </table>
+                  : (l.indisponible ? `<span class="badge badge-sortie">Indispo</span>` : `<span class="badge badge-entree">OK</span>`)}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      ` : `<div style="text-align:center;padding:2rem;color:var(--text-secondary)">Aucune ligne — utilisez la recherche ci-dessous pour ajouter des articles.</div>`}
     </div>
 
     ${isEnCours ? `
-      <div class="form-section-title">Ajouter une ligne</div>
-      <div class="search-bar">
-        <input type="text" id="bon-search" placeholder="Référence ou lot…" oninput="searchStockForBon('${bonId}')" />
+      <div class="card">
+        <div class="card-header"><div class="card-title">Ajouter un article</div></div>
+        <div class="search-bar" style="margin-bottom:1rem">
+          <input type="text" id="bon-search" placeholder="Référence, lot, emplacement, remarque…"
+            oninput="searchStockForBon('${bonId}')" style="flex:1" />
+        </div>
+        <div id="bon-search-results"></div>
       </div>
-      <div id="bon-search-results"></div>
-
-      <div class="form-actions" style="margin-top:1.4rem">
-        <button class="btn-success" onclick="validerBon('${bonId}')">✓ Valider le bon → générer BL</button>
-        <button class="btn-danger" onclick="deleteBon('${bonId}', false)">🗑 Supprimer le bon</button>
-        <button class="btn-secondary" onclick="closeModal()">Fermer</button>
-      </div>
-    ` : `
-      <div class="form-actions" style="margin-top:1.4rem">
-        <button class="btn-primary" onclick="genererPDF('${bonId}')">📄 Télécharger le BL</button>
-        <button class="btn-danger" onclick="deleteBon('${bonId}', true)">🗑 Supprimer (annuler le BL)</button>
-        <button class="btn-secondary" onclick="closeModal()">Fermer</button>
-      </div>
-    `}
-  `);
+    ` : ''}
+  `;
 }
 
 async function deleteBon(bonId, wasValidated) {
@@ -2369,7 +2409,6 @@ async function deleteBon(bonId, wasValidated) {
   await sb.from('bons_preparation').delete().eq('id', bonId);
 
   toast(wasValidated ? 'Bon et BL supprimés, stock restauré.' : 'Bon supprimé, réservations libérées.');
-  closeModal();
   renderBons();
 }
 
@@ -2382,29 +2421,69 @@ async function searchStockForBon(bonId) {
 
   bonSearchDebounce = setTimeout(async () => {
     const { data } = await sb.from('stock').select('*')
-      .or(`reference.ilike.%${q}%,lot.ilike.%${q}%`)
-      .order('reference').limit(8);
+      .or(`reference.ilike.%${q}%,lot.ilike.%${q}%,depot.ilike.%${q}%,rangee.ilike.%${q}%,remarque.ilike.%${q}%,conditionnement.ilike.%${q}%`)
+      .gt('quantite', 0)
+      .order('reference').limit(15);
 
     if (!data?.length) {
       res.innerHTML = `<p style="font-size:.85rem;color:var(--text-secondary);margin:.5rem 0">
-        Aucun article trouvé en stock. <button class="btn-secondary btn-sm" onclick="addBonLigneManuelle('${bonId}', '${q.replace(/'/g,"\\'")}')">Ajouter "${q}" quand même (indisponible)</button>
+        Aucun article trouvé en stock.
+        <button class="btn-secondary btn-sm" onclick="addBonLigneManuelle('${bonId}', '${q.replace(/'/g,"\\'")}')">Ajouter "${q}" quand même (indisponible)</button>
       </p>`;
       return;
     }
 
-    res.innerHTML = `<div class="table-wrapper"><table>
-      <thead><tr><th>Référence</th><th>Lot</th><th>Dépôt</th><th>Dispo</th><th>Qté</th><th></th></tr></thead>
-      <tbody>${data.map((r, i) => `
-        <tr>
-          <td class="td-ref">${fmt(r.reference)}</td>
-          <td class="td-lot">${fmt(r.lot)}</td>
-          <td>${badgeDepot(r.depot)}</td>
-          <td class="td-qte">${(r.quantite - (r.quantite_reservee || 0)).toFixed(0)}</td>
-          <td><input type="number" id="bon-qte-${i}" value="1" min="1" style="width:55px;padding:.25rem .4rem;border:1.5px solid var(--border);border-radius:4px" /></td>
-          <td><button class="btn-primary btn-sm" onclick='addBonLigne("${bonId}", ${JSON.stringify(r).replace(/'/g,"&#39;")}, ${i})'>Ajouter</button></td>
-        </tr>
-      `).join('')}</tbody>
-    </table></div>`;
+    res.innerHTML = `
+      <!-- Vue tableau desktop -->
+      <div class="table-wrapper stock-table-view">
+        <table>
+          <thead><tr>
+            <th>Référence</th><th>Lot</th><th>Cond.</th><th>Dépôt</th><th>Rangée</th>
+            <th>Remarque</th><th>Stock</th><th>Qté à sortir</th><th></th>
+          </tr></thead>
+          <tbody>
+            ${data.map((r, i) => {
+              const dispo = r.quantite - (r.quantite_reservee || 0);
+              return `<tr>
+                <td class="td-ref">${fmt(r.reference)}</td>
+                <td class="td-lot">${fmt(r.lot)}</td>
+                <td style="font-size:.78rem;color:var(--text-secondary)">${fmt(r.conditionnement)}</td>
+                <td>${badgeDepot(r.depot)}</td>
+                <td>${fmt(r.rangee)}</td>
+                <td style="font-size:.78rem;color:var(--text-secondary);max-width:100px">${fmt(r.remarque)}</td>
+                <td style="font-size:1rem;font-weight:700;color:var(--accent);text-align:center">${dispo}</td>
+                <td><input type="number" id="bon-qte-${i}" value="1" min="1" max="${dispo}"
+                  style="width:65px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" /></td>
+                <td><button class="btn-primary btn-sm" onclick='addBonLigne("${bonId}", ${JSON.stringify(r).replace(/'/g,"&#39;")}, ${i})'>+ Ajouter</button></td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+      <!-- Vue cartes mobile -->
+      <div class="stock-card-view">
+        ${data.map((r, i) => {
+          const dispo = r.quantite - (r.quantite_reservee || 0);
+          return `<div class="import-card">
+            <div class="import-card-header">
+              <span style="font-weight:600">${r.reference}</span>
+              <span style="font-size:1.1rem;font-weight:700;color:var(--accent)">${dispo}</span>
+            </div>
+            <div style="font-size:.82rem;color:var(--text-secondary);margin-bottom:.5rem">
+              ${r.lot ? `Lot : ${r.lot}` : ''}
+              ${r.conditionnement ? ` · ${r.conditionnement}` : ''}
+              ${r.depot ? ` · ${r.depot}` : ''}${r.rangee ? ` / ${r.rangee}` : ''}
+            </div>
+            ${r.remarque ? `<div style="font-size:.78rem;color:var(--text-secondary);margin-bottom:.5rem">${r.remarque}</div>` : ''}
+            <div style="display:flex;align-items:center;gap:.5rem">
+              <input type="number" id="bon-qte-${i}" value="1" min="1"
+                style="width:65px;padding:.4rem .5rem;border:1.5px solid var(--border);border-radius:4px" />
+              <button class="btn-primary btn-sm" onclick='addBonLigne("${bonId}", ${JSON.stringify(r).replace(/'/g,"&#39;")}, ${i})'>+ Ajouter</button>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    `;
   }, 300);
 }
 
@@ -2415,6 +2494,8 @@ async function addBonLigne(bonId, stockRow, inputIndex) {
     bon_id: bonId, stock_id: stockRow.id,
     reference: stockRow.reference, lot: stockRow.lot,
     depot: stockRow.depot, rangee: stockRow.rangee,
+    conditionnement: stockRow.conditionnement || null,
+    remarque: stockRow.remarque || null,
     quantite: qte, added_by: currentProfile?.prenom || currentUser?.email
   });
   if (error) { toast('Erreur : ' + error.message, 'error'); return; }
@@ -2526,8 +2607,7 @@ async function validerBon(bonId) {
   }).eq('id', bonId);
 
   toast(`Bon validé ! ${numeroBL}`);
-  closeModal();
-  renderBons();
+  openBon(bonId);
 }
 
 async function genererPDF(bonId) {
