@@ -83,7 +83,7 @@ function navigate(page) {
     entree: 'Entrée de stock', sortie: 'Sortie de stock',
     deplacement: 'Déplacement', historique: 'Historique des mouvements',
     zones: 'Zones & Dépôts', inventaire: 'Inventaire',
-    'import-photo': 'Import par photo', 'bons': 'Bons de préparation'
+    'bons': 'Bons de préparation'
   };
   document.getElementById('page-title').textContent = titles[page] || page;
 
@@ -94,7 +94,7 @@ function navigate(page) {
     entree: renderEntree, sortie: renderSortie,
     deplacement: renderDeplacement, historique: renderHistorique,
     zones: renderZones, inventaire: renderInventaire,
-    'import-photo': renderImportPhoto, 'bons': renderBons
+    'bons': renderBons
   };
   renderers[page]?.();
 }
@@ -601,44 +601,70 @@ async function saveEditStock(id) {
 async function renderEntree() {
   const el = document.getElementById('page-entree');
   el.innerHTML = `
-    <div class="card form-card">
-      <div class="card-header"><div class="card-title">Enregistrer une entrée de stock</div></div>
-      <div class="form-section-title">Identification</div>
-      <div class="form-group"><label>Référence *</label>
-        <input type="text" id="e-ref" placeholder="ex: 35SO530E00077" /></div>
-      <div class="form-group"><label>Numéro de lot</label>
-        <input type="text" id="e-lot" placeholder="ex: 4500173743" /></div>
-      <div class="form-group"><label>Conditionnement</label>
-        <input type="text" id="e-conditionnement" placeholder="ex: palette, caisse, colis…" /></div>
-      <div class="form-group"><label>Désignation</label>
-        <input type="text" id="e-desig" placeholder="ex: Caisse bois, Palette mécanisme…" /></div>
-      <div class="form-section-title">Emplacement</div>
-      <div class="form-row">
-        <div class="form-group"><label>Dépôt *</label>
-          <input type="text" id="e-depot" placeholder="ex: 1, 2, RENO…" list="depot-list" /></div>
-        <div class="form-group"><label>Rangée</label>
-          <input type="text" id="e-rangee" placeholder="ex: 5, FOND, RACK…" /></div>
-      </div>
-      <div class="form-section-title">Quantité & date</div>
-      <div class="form-row">
-        <div class="form-group"><label>Quantité *</label>
-          <input type="number" id="e-qte" min="1" value="1" /></div>
-        <div class="form-group"><label>Date de réception</label>
-          <input type="date" id="e-date" value="${new Date().toISOString().slice(0,10)}" /></div>
-      </div>
-      <div class="form-group"><label>Remarque</label>
-        <textarea id="e-remarque" placeholder="Informations complémentaires…"></textarea></div>
-      <div class="form-actions">
-        <button class="btn-success" id="e-save-btn" onclick="saveEntree()">✓ Enregistrer l'entrée</button>
-        <button class="btn-secondary" onclick="resetEntreeForm()">Réinitialiser</button>
-      </div>
+    <div style="display:flex;gap:.6rem;margin-bottom:1rem;flex-wrap:wrap">
+      <button class="btn-primary" id="tab-entree-manuelle" onclick="showEntreeTab('manuelle')" style="opacity:1">✏️ Saisie manuelle</button>
+      <button class="btn-secondary" id="tab-entree-photo" onclick="showEntreeTab('photo')">📷 Import par photo</button>
     </div>
-    <datalist id="depot-list"></datalist>
+
+    <!-- Saisie manuelle -->
+    <div id="entree-manuelle">
+      <div class="card form-card">
+        <div class="card-header"><div class="card-title">Enregistrer une entrée de stock</div></div>
+        <div class="form-section-title">Identification</div>
+        <div class="form-group"><label>Référence *</label>
+          <input type="text" id="e-ref" placeholder="ex: 35SO530E00077" /></div>
+        <div class="form-group"><label>Numéro de lot</label>
+          <input type="text" id="e-lot" placeholder="ex: 4500173743" /></div>
+        <div class="form-group"><label>Conditionnement</label>
+          <input type="text" id="e-conditionnement" placeholder="ex: palette, caisse, colis…" /></div>
+        <div class="form-group"><label>Désignation</label>
+          <input type="text" id="e-desig" placeholder="ex: Caisse bois, Palette mécanisme…" /></div>
+        <div class="form-section-title">Emplacement</div>
+        <div class="form-row">
+          <div class="form-group"><label>Dépôt *</label>
+            <input type="text" id="e-depot" placeholder="ex: 1, 2, RENO…" list="depot-list" /></div>
+          <div class="form-group"><label>Rangée</label>
+            <input type="text" id="e-rangee" placeholder="ex: 5, FOND, RACK…" /></div>
+        </div>
+        <div class="form-section-title">Quantité & date</div>
+        <div class="form-row">
+          <div class="form-group"><label>Quantité *</label>
+            <input type="number" id="e-qte" min="1" value="1" /></div>
+          <div class="form-group"><label>Date de réception</label>
+            <input type="date" id="e-date" value="${new Date().toISOString().slice(0,10)}" /></div>
+        </div>
+        <div class="form-group"><label>Remarque</label>
+          <textarea id="e-remarque" placeholder="Informations complémentaires…"></textarea></div>
+        <div class="form-actions">
+          <button class="btn-success" id="e-save-btn" onclick="saveEntree()">✓ Enregistrer l'entrée</button>
+          <button class="btn-secondary" onclick="resetEntreeForm()">Réinitialiser</button>
+        </div>
+      </div>
+      <datalist id="depot-list"></datalist>
+    </div>
+
+    <!-- Import par photo -->
+    <div id="entree-photo" class="hidden">
+      ${renderImportPhotoHTML('entree')}
+    </div>
   `;
-  // Charger la liste des dépôts connus
+
+  // Charger la liste des dépôts
   const { data } = await sb.from('stock').select('depot').not('depot', 'is', null);
   const depots = [...new Set(data?.map(r => r.depot))].sort();
-  document.getElementById('depot-list').innerHTML = depots.map(d => `<option value="${d}">`).join('');
+  const dl = document.getElementById('depot-list');
+  if (dl) dl.innerHTML = depots.map(d => `<option value="${d}">`).join('');
+
+  // Charger les imports récents
+  chargerSessionsImport('entree');
+}
+
+function showEntreeTab(tab) {
+  document.getElementById('entree-manuelle').classList.toggle('hidden', tab !== 'manuelle');
+  document.getElementById('entree-photo').classList.toggle('hidden', tab !== 'photo');
+  document.getElementById('tab-entree-manuelle').className = tab === 'manuelle' ? 'btn-primary' : 'btn-secondary';
+  document.getElementById('tab-entree-photo').className = tab === 'photo' ? 'btn-primary' : 'btn-secondary';
+  if (tab === 'photo') chargerSessionsImport('entree');
 }
 
 async function saveEntree() {
@@ -727,31 +753,52 @@ function resetEntreeForm() {
 async function renderSortie() {
   const el = document.getElementById('page-sortie');
   el.innerHTML = `
-    <div class="card form-card">
-      <div class="card-header"><div class="card-title">Enregistrer une sortie de stock</div></div>
-      <div class="form-section-title">Rechercher l'article</div>
-      <div class="search-bar" style="margin-bottom:.5rem">
-        <input type="text" id="s-search" placeholder="Référence ou lot…" oninput="searchStockForSortie()" />
-      </div>
-      <div id="s-results"></div>
-      <div id="s-form" class="hidden">
-        <div class="form-section-title">Sortie</div>
-        <div id="s-article-info" style="background:var(--accent-light);border-radius:var(--radius-sm);padding:.8rem;margin-bottom:1rem;font-size:.88rem"></div>
-        <div class="form-row">
-          <div class="form-group"><label>Quantité sortante *</label>
-            <input type="number" id="s-qte" min="1" value="1" /></div>
-          <div class="form-group"><label>Date de sortie</label>
-            <input type="date" id="s-date" value="${new Date().toISOString().slice(0,10)}" /></div>
+    <div style="display:flex;gap:.6rem;margin-bottom:1rem;flex-wrap:wrap">
+      <button class="btn-primary" id="tab-sortie-manuelle" onclick="showSortieTab('manuelle')">✏️ Saisie manuelle</button>
+      <button class="btn-secondary" id="tab-sortie-photo" onclick="showSortieTab('photo')">📷 Import par photo</button>
+    </div>
+
+    <!-- Saisie manuelle -->
+    <div id="sortie-manuelle">
+      <div class="card form-card">
+        <div class="card-header"><div class="card-title">Enregistrer une sortie de stock</div></div>
+        <div class="form-section-title">Rechercher l'article</div>
+        <div class="search-bar" style="margin-bottom:.5rem">
+          <input type="text" id="s-search" placeholder="Référence ou lot…" oninput="searchStockForSortie()" />
         </div>
-        <div class="form-group"><label>Remarque</label>
-          <textarea id="s-remarque" placeholder="Nom du preneur, commande…"></textarea></div>
-        <div class="form-actions">
-          <button class="btn-danger" onclick="saveSortie()">↑ Enregistrer la sortie</button>
-          <button class="btn-secondary" onclick="cancelSortie()">Annuler</button>
+        <div id="s-results"></div>
+        <div id="s-form" class="hidden">
+          <div class="form-section-title">Sortie</div>
+          <div id="s-article-info" style="background:var(--accent-light);border-radius:var(--radius-sm);padding:.8rem;margin-bottom:1rem;font-size:.88rem"></div>
+          <div class="form-row">
+            <div class="form-group"><label>Quantité sortante *</label>
+              <input type="number" id="s-qte" min="1" value="1" /></div>
+            <div class="form-group"><label>Date de sortie</label>
+              <input type="date" id="s-date" value="${new Date().toISOString().slice(0,10)}" /></div>
+          </div>
+          <div class="form-group"><label>Remarque</label>
+            <textarea id="s-remarque" placeholder="Nom du preneur, commande…"></textarea></div>
+          <div class="form-actions">
+            <button class="btn-danger" onclick="saveSortie()">↑ Enregistrer la sortie</button>
+            <button class="btn-secondary" onclick="cancelSortie()">Annuler</button>
+          </div>
         </div>
       </div>
     </div>
+
+    <!-- Import par photo -->
+    <div id="sortie-photo" class="hidden">
+      ${renderImportPhotoHTML('sortie')}
+    </div>
   `;
+}
+
+function showSortieTab(tab) {
+  document.getElementById('sortie-manuelle').classList.toggle('hidden', tab !== 'manuelle');
+  document.getElementById('sortie-photo').classList.toggle('hidden', tab !== 'photo');
+  document.getElementById('tab-sortie-manuelle').className = tab === 'manuelle' ? 'btn-primary' : 'btn-secondary';
+  document.getElementById('tab-sortie-photo').className = tab === 'photo' ? 'btn-primary' : 'btn-secondary';
+  if (tab === 'photo') chargerSessionsImport('sortie');
 }
 
 let selectedStockRow = null;
@@ -1713,87 +1760,85 @@ let importRowsOriginal = [];
 let importType = 'sortie';
 let importDate = new Date().toISOString().slice(0, 10);
 
-function renderImportPhoto() {
-  const el = document.getElementById('page-import-photo');
-  el.innerHTML = `
-    <div style="display:flex;align-items:center;gap:.8rem;margin-bottom:1rem;flex-wrap:wrap">
-      <h2 style="font-size:1rem;font-weight:600;flex:1">Import par photo</h2>
-    </div>
-
+function renderImportPhotoHTML(type) {
+  const typeLabel = type === 'entree' ? 'Entrée' : 'Sortie';
+  const date = new Date().toISOString().slice(0, 10);
+  return `
     <div class="card" style="margin-bottom:1rem">
-      <div class="form-row">
-        <div class="form-group"><label>Type *</label>
-          <select id="ip-type" onchange="importType=this.value">
-            <option value="sortie">Sortie (enlèvement client)</option>
-            <option value="entree">Entrée (réception conteneur)</option>
-          </select>
-        </div>
-        <div class="form-group"><label>Date *</label>
-          <input type="date" id="ip-date" value="${importDate}" onchange="importDate=this.value" />
-        </div>
-      </div>
+      <div class="card-header"><div class="card-title">📷 Import par photo — ${typeLabel}</div></div>
+      <p style="font-size:.85rem;color:var(--text-secondary);margin-bottom:1rem">
+        Photographiez votre feuille manuscrite. Claude va lire les références, lots, quantités et emplacements.
+      </p>
+      <div class="form-group"><label>Date</label>
+        <input type="date" id="ip-date-${type}" value="${date}" onchange="importDate=this.value" /></div>
 
-      <div id="ip-drop-zone" class="ip-drop-zone" onclick="document.getElementById('ip-file').click()" style="margin-top:.5rem">
-        <div id="ip-preview-wrap">
+      <div id="ip-drop-zone-${type}" class="ip-drop-zone" onclick="document.getElementById('ip-file-${type}').click()">
+        <div id="ip-preview-wrap-${type}">
           <div class="ip-drop-icon">📷</div>
           <p>Appuyez pour prendre une photo ou choisir depuis la galerie</p>
         </div>
-        <input type="file" id="ip-file" accept="image/*" style="display:none" onchange="onImportPhotoSelected(this)" />
+        <input type="file" id="ip-file-${type}" accept="image/*" style="display:none"
+          onchange="onImportPhotoSelected(this, '${type}')" />
       </div>
 
-      <div id="ip-analyse-wrap" class="hidden" style="margin-top:1rem">
-        <button class="btn-primary" id="ip-analyse-btn" onclick="analyseImportPhoto()">🔍 Analyser la photo</button>
+      <div id="ip-analyse-wrap-${type}" class="hidden" style="margin-top:1rem">
+        <button class="btn-primary" id="ip-analyse-btn-${type}" onclick="analyseImportPhoto('${type}')">
+          🔍 Analyser la photo
+        </button>
       </div>
     </div>
 
-    <div id="ip-results-wrap" class="hidden">
+    <div id="ip-results-wrap-${type}" class="hidden">
       <div class="card">
         <div class="card-header">
-          <div class="card-title">Vérification — <span id="ip-results-count"></span></div>
+          <div class="card-title">Vérification — <span id="ip-results-count-${type}"></span></div>
           <div style="display:flex;gap:.5rem">
-            <button class="btn-secondary btn-sm" onclick="addImportRow()">+ Ligne</button>
-            <button class="btn-success" id="ip-validate-btn" onclick="validateImport()">✓ Valider l'import</button>
+            <button class="btn-secondary btn-sm" onclick="addImportRow('${type}')">+ Ligne</button>
+            <button class="btn-success" id="ip-validate-btn-${type}" onclick="validateImport('${type}')">✓ Valider</button>
           </div>
         </div>
-        <p style="font-size:.82rem;color:var(--text-secondary);margin-bottom:.8rem">Vérifiez et corrigez si nécessaire avant de valider.</p>
-
-        <!-- Vue tableau desktop -->
+        <p style="font-size:.82rem;color:var(--text-secondary);margin-bottom:.8rem">Vérifiez et corrigez avant de valider.</p>
         <div class="table-wrapper stock-table-view">
           <table>
             <thead><tr>
               <th>Référence</th><th>Lot</th><th>Cond.</th><th>Qté</th><th>Dépôt</th><th>Rangée</th><th>Remarque</th><th></th>
             </tr></thead>
-            <tbody id="ip-tbody"></tbody>
+            <tbody id="ip-tbody-${type}"></tbody>
           </table>
         </div>
-        <!-- Vue cartes mobile/tablette -->
-        <div class="stock-card-view" id="ip-cards"></div>
+        <div class="stock-card-view" id="ip-cards-${type}"></div>
       </div>
     </div>
 
     <div class="card" style="margin-top:1rem">
-      <div class="card-header"><div class="card-title">Imports récents</div></div>
-      <div id="sessions-wrap">${spinner()}</div>
+      <div class="card-header"><div class="card-title">Imports récents — ${typeLabel}</div></div>
+      <div id="sessions-wrap-${type}">${spinner()}</div>
     </div>
   `;
-  chargerSessionsImport();
 }
 
-async function onImportPhotoSelected(input) {
+function renderImportPhoto() {
+  // Redirige vers la page entrée par défaut
+  navigateTo('entree');
+  setTimeout(() => showEntreeTab('photo'), 100);
+}
+
+async function onImportPhotoSelected(input, type) {
+  type = type || 'entree';
   const file = input.files[0];
   if (!file) return;
 
-  // Afficher prévisualisation
   const reader = new FileReader();
   reader.onload = e => {
-    document.getElementById('ip-preview-wrap').innerHTML = `
+    const previewId = `ip-preview-wrap-${type}`;
+    const el = document.getElementById(previewId) || document.getElementById('ip-preview-wrap');
+    if (el) el.innerHTML = `
       <img src="${e.target.result}" style="max-width:100%;max-height:300px;border-radius:8px;object-fit:contain" />
       <p style="font-size:.8rem;color:var(--text-secondary);margin-top:.5rem">Appuyez pour changer la photo</p>
     `;
   };
   reader.readAsDataURL(file);
 
-  // Compresser et stocker en base64
   const compressed = await compressImage(file, 1600, 0.85);
   const b64 = await new Promise(resolve => {
     const r = new FileReader();
@@ -1801,14 +1846,15 @@ async function onImportPhotoSelected(input) {
     r.readAsDataURL(compressed);
   });
   importPhotoData = { base64: b64, mediaType: 'image/jpeg' };
-  document.getElementById('ip-analyse-wrap').classList.remove('hidden');
+  const analyseWrap = document.getElementById(`ip-analyse-wrap-${type}`) || document.getElementById('ip-analyse-wrap');
+  if (analyseWrap) analyseWrap.classList.remove('hidden');
 }
 
-async function analyseImportPhoto() {
+async function analyseImportPhoto(type) {
+  type = type || 'entree';
   if (!importPhotoData) return;
-  const btn = document.getElementById('ip-analyse-btn');
-  btn.textContent = '⏳ Analyse en cours…';
-  btn.disabled = true;
+  const btn = document.getElementById(`ip-analyse-btn-${type}`) || document.getElementById('ip-analyse-btn');
+  if (btn) { btn.textContent = '⏳ Analyse en cours…'; btn.disabled = true; }
 
   const corrections = await chargerCorrections();
   const correctionsPrompt = buildCorrectionsPrompt(corrections);
@@ -1880,7 +1926,8 @@ Si valeur absente, mets null. Vérifie DEUX FOIS chaque quantité avant de répo
 
     btn.textContent = '🔍 Analyser la photo';
     btn.disabled = false;
-    renderImportTable();
+    currentImportType = type;
+    renderImportTable(type);
 
   } catch(e) {
     toast('Erreur d\'analyse : ' + e.message, 'error');
@@ -1889,29 +1936,38 @@ Si valeur absente, mets null. Vérifie DEUX FOIS chaque quantité avant de répo
   }
 }
 
-function renderImportTable() {
-  document.getElementById('ip-results-wrap').classList.remove('hidden');
-  document.getElementById('ip-results-count').textContent = `${importRows.length} ligne${importRows.length > 1 ? 's' : ''} détectée${importRows.length > 1 ? 's' : ''}`;
+let currentImportType = 'entree';
 
-  const tbody = document.getElementById('ip-tbody');
-  tbody.innerHTML = '';
-  importRows.forEach((row, i) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td><input type="text" value="${row.reference || ''}" onchange="importRows[${i}].reference=this.value" style="width:100%;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.82rem;font-family:monospace" /></td>
-      <td><input type="text" value="${row.lot || ''}" onchange="importRows[${i}].lot=this.value" style="width:100%;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.82rem;font-family:monospace" /></td>
-      <td><input type="text" value="${row.conditionnement || ''}" onchange="importRows[${i}].conditionnement=this.value" style="width:90px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.8rem" placeholder="palette…" /></td>
-      <td><input type="number" value="${row.quantite ?? 1}" min="1" onchange="importRows[${i}].quantite=parseFloat(this.value)" style="width:60px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.85rem" /></td>
-      <td><input type="text" value="${row.depot || ''}" onchange="importRows[${i}].depot=this.value" style="width:70px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.85rem" /></td>
-      <td><input type="text" value="${row.rangee || ''}" onchange="importRows[${i}].rangee=this.value" style="width:70px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.85rem" /></td>
-      <td><input type="text" value="${row.remarque || ''}" onchange="importRows[${i}].remarque=this.value" style="width:100%;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.82rem" placeholder="remarque…" /></td>
-      <td><button class="btn-danger btn-sm" onclick="removeImportRow(${i})">✕</button></td>
-    `;
-    tbody.appendChild(tr);
-  });
+function renderImportTable(type) {
+  type = type || currentImportType || 'entree';
+  currentImportType = type;
 
-  // Vue cartes pour mobile
-  const cardsWrap = document.getElementById('ip-cards');
+  const wrap = document.getElementById(`ip-results-wrap-${type}`) || document.getElementById('ip-results-wrap');
+  const countEl = document.getElementById(`ip-results-count-${type}`) || document.getElementById('ip-results-count');
+  const tbody = document.getElementById(`ip-tbody-${type}`) || document.getElementById('ip-tbody');
+  const cardsWrap = document.getElementById(`ip-cards-${type}`) || document.getElementById('ip-cards');
+
+  if (wrap) wrap.classList.remove('hidden');
+  if (countEl) countEl.textContent = `${importRows.length} ligne${importRows.length > 1 ? 's' : ''} détectée${importRows.length > 1 ? 's' : ''}`;
+
+  if (tbody) {
+    tbody.innerHTML = '';
+    importRows.forEach((row, i) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><input type="text" value="${row.reference || ''}" onchange="importRows[${i}].reference=this.value" style="width:100%;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.82rem;font-family:monospace" /></td>
+        <td><input type="text" value="${row.lot || ''}" onchange="importRows[${i}].lot=this.value" style="width:100%;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.82rem;font-family:monospace" /></td>
+        <td><input type="text" value="${row.conditionnement || ''}" onchange="importRows[${i}].conditionnement=this.value" style="width:90px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.8rem" placeholder="palette…" /></td>
+        <td><input type="number" value="${row.quantite ?? 1}" min="1" onchange="importRows[${i}].quantite=parseFloat(this.value)" style="width:60px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.85rem" /></td>
+        <td><input type="text" value="${row.depot || ''}" onchange="importRows[${i}].depot=this.value" style="width:70px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.85rem" /></td>
+        <td><input type="text" value="${row.rangee || ''}" onchange="importRows[${i}].rangee=this.value" style="width:70px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.85rem" /></td>
+        <td><input type="text" value="${row.remarque || ''}" onchange="importRows[${i}].remarque=this.value" style="width:100%;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.82rem" placeholder="remarque…" /></td>
+        <td><button class="btn-danger btn-sm" onclick="removeImportRow(${i})">✕</button></td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
   if (cardsWrap) {
     cardsWrap.innerHTML = '';
     importRows.forEach((row, i) => {
@@ -1959,34 +2015,36 @@ function renderImportTable() {
     });
   }
 }
-
 function syncImportTable() {
   // Re-render sans perdre le focus (juste sync les données)
   renderImportTable();
 }
 
-function addImportRow() {
+function addImportRow(type) {
+  type = type || currentImportType || 'entree';
   importRows.push({ reference: '', lot: '', conditionnement: '', quantite: 1, depot: '', rangee: '' });
-  renderImportTable();
+  renderImportTable(type);
+  const wrap = document.getElementById(`ip-results-wrap-${type}`) || document.getElementById('ip-results-wrap');
+  if (wrap) wrap.classList.remove('hidden');
 }
 
 function removeImportRow(i) {
   importRows.splice(i, 1);
-  renderImportTable();
+  renderImportTable(currentImportType);
 }
 
-async function validateImport() {
+async function validateImport(type) {
+  type = type || currentImportType || 'entree';
   if (!importRows.length) { toast('Aucune ligne à importer.', 'error'); return; }
 
-  const type = document.getElementById('ip-type').value;
-  const date = document.getElementById('ip-date').value;
+  const date = document.getElementById(`ip-date-${type}`)?.value || new Date().toISOString().slice(0,10);
   const typeLabel = type === 'entree' ? 'ENTRÉE' : 'SORTIE';
   const emoji = type === 'entree' ? '📥' : '📤';
 
   const confirme = confirm(`${emoji} Confirmer l'import ?\n\n${importRows.length} ligne${importRows.length > 1 ? 's' : ''} en ${typeLabel}\nDate : ${date}\n\nVérifiez bien le type avant de valider.`);
   if (!confirme) return;
 
-  const btn = document.getElementById('ip-validate-btn');
+  const btn = document.getElementById(`ip-validate-btn-${type}`) || document.getElementById('ip-validate-btn');
   if (btn) {
     if (btn.disabled) return; // protection double-clic
     btn.disabled = true;
@@ -2074,17 +2132,31 @@ async function validateImport() {
   toast(`${ok} mouvement${ok > 1 ? 's' : ''} importé${ok > 1 ? 's' : ''} avec succès !`);
   importRows = [];
   importPhotoData = null;
-  renderImportPhoto();
+  // Réinitialiser le bouton
+  if (btn) { btn.disabled = false; btn.textContent = '✓ Valider'; }
+  // Recharger les imports récents
+  chargerSessionsImport(type);
+  // Masquer la zone de résultats
+  const wrap = document.getElementById(`ip-results-wrap-${type}`) || document.getElementById('ip-results-wrap');
+  if (wrap) wrap.classList.add('hidden');
+  // Réinitialiser la photo
+  const previewWrap = document.getElementById(`ip-preview-wrap-${type}`) || document.getElementById('ip-preview-wrap');
+  if (previewWrap) previewWrap.innerHTML = `<div class="ip-drop-icon">📷</div><p>Appuyez pour prendre une photo ou choisir depuis la galerie</p>`;
+  const analyseWrap = document.getElementById(`ip-analyse-wrap-${type}`) || document.getElementById('ip-analyse-wrap');
+  if (analyseWrap) analyseWrap.classList.add('hidden');
 }
 
 // ═══════════════════════════════════════ SESSIONS IMPORT ════
 
-async function chargerSessionsImport() {
-  const wrap = document.getElementById('sessions-wrap');
+async function chargerSessionsImport(type) {
+  const wrapId = type ? `sessions-wrap-${type}` : 'sessions-wrap';
+  const wrap = document.getElementById(wrapId);
   if (!wrap) return;
 
-  const { data: sessions } = await sb.from('sessions_import')
-    .select('*').order('created_at', { ascending: false }).limit(20);
+  let query = sb.from('sessions_import').select('*').order('created_at', { ascending: false }).limit(20);
+  if (type && type !== 'inventaire') query = query.eq('type', type);
+
+  const { data: sessions } = await query;
 
   if (!sessions?.length) {
     wrap.innerHTML = emptyState('Aucun import enregistré.');
