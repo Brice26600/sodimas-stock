@@ -1557,8 +1557,8 @@ Si valeur absente, mets null. Le champ "remarque" = tout commentaire dans la col
     const data = await response.json();
     if (data.error) throw new Error(JSON.stringify(data.error));
     const text = data.content?.map(c => c.text || '').join('').trim();
-    const cleanedInv = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    const match = cleanedInv.match(/\[[\s\S]*\]/);
+    let jsonStrInv = text.replace(/`{1,3}json\s*/gi, '').replace(/`{1,3}/g, '').trim();
+    const match = jsonStrInv.match(/\[[\s\S]*\]/);
     if (!match) throw new Error('JSON introuvable');
     invPhotoRows = JSON.parse(match[0]);
     // Sauvegarder le snapshot original avant toute correction manuelle
@@ -1920,9 +1920,9 @@ Si valeur absente, mets null. Vérifie DEUX FOIS chaque quantité avant de répo
     const text = data.content?.map(c => c.text || '').join('').trim();
     if (!text) throw new Error('Réponse vide de Claude');
     // Extraire le JSON même s'il y a du texte autour
-    // Nettoyer les backticks markdown si présents
-    const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    const match = cleaned.match(/\[[\s\S]*\]/);
+    // Extraire le JSON même s'il est entouré de backticks markdown
+    let jsonStr = text.replace(/`{1,3}json\s*/gi, '').replace(/`{1,3}/g, '').trim();
+    const match = jsonStr.match(/\[[\s\S]*\]/);
     if (!match) throw new Error('JSON introuvable. Réponse : ' + text.slice(0, 200));
     importRows = JSON.parse(match[0]);
     importRowsOriginal = JSON.parse(JSON.stringify(importRows));
