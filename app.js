@@ -1557,6 +1557,7 @@ Si valeur absente, mets null. Le champ "remarque" = tout commentaire dans la col
     const data = await response.json();
     if (data.error) throw new Error(JSON.stringify(data.error));
     const text = data.content?.map(c => c.text || '').join('').trim();
+    console.log('Réponse Claude:', text);
     const firstBracketInv = text.indexOf('[');
     const lastBracketInv = text.lastIndexOf(']');
     if (firstBracketInv === -1 || lastBracketInv === -1) throw new Error('JSON introuvable');
