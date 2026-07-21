@@ -2266,7 +2266,10 @@ async function renderBons() {
   el.innerHTML = `
     <div class="card-header" style="margin-bottom:1rem">
       <div></div>
-      <button class="btn-primary" onclick="openNewBonModal()">+ Nouveau bon</button>
+      <div style="display:flex;gap:.5rem">
+        <button class="btn-secondary" onclick="importBonParPhoto()">📷 Import par photo</button>
+        <button class="btn-primary" onclick="openNewBonModal()">+ Nouveau bon</button>
+      </div>
     </div>
     <div class="card">
       <div class="card-header"><div class="card-title">Bons de préparation</div></div>
@@ -2291,6 +2294,349 @@ async function renderBons() {
       ` : emptyState('Aucun bon de préparation.')}
     </div>
   `;
+}
+
+function importBonParPhoto() {
+  let photoData = null;
+
+  openModal('Import bon par photo', `
+    <p style="font-size:.85rem;color:var(--text-secondary);margin-bottom:1rem">
+      Photographiez votre feuille SODIMAS. Claude va lire le type, le destinataire, la date et toutes les lignes automatiquement.
+    </p>
+    <div id="bon-photo-drop" class="ip-drop-zone" onclick="document.getElementById('bon-photo-file').click()">
+      <div id="bon-photo-preview">
+        <div class="ip-drop-icon">📷</div>
+        <p>Appuyez pour prendre une photo ou choisir depuis la galerie</p>
+      </div>
+      <input type="file" id="bon-photo-file" accept="image/*" style="display:none" onchange="onBonPhotoSelected(this)" />
+    </div>
+    <div id="bon-photo-analyse-wrap" class="hidden" style="margin-top:1rem">
+      <button class="btn-primary" id="bon-photo-analyse-btn" onclick="analysePhotoBon()">🔍 Analyser la photo</button>
+    </div>
+  `);
+}
+
+async function onBonPhotoSelected(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    document.getElementById('bon-photo-preview').innerHTML = `
+      <img src="${e.target.result}" style="max-width:100%;max-height:300px;border-radius:8px;object-fit:contain" />
+      <p style="font-size:.8rem;color:var(--text-secondary);margin-top:.5rem">Appuyez pour changer la photo</p>
+    `;
+  };
+  reader.readAsDataURL(file);
+  const compressed = await compressImage(file, 1600, 0.85);
+  const b64 = await new Promise(resolve => {
+    const r = new FileReader();
+    r.onload = e => resolve(e.target.result.split(',')[1]);
+    r.readAsDataURL(compressed);
+  });
+  window._bonPhotoData = { base64: b64, mediaType: 'image/jpeg' };
+  document.getElementById('bon-photo-analyse-wrap').classList.remove('hidden');
+}
+
+async function analysePhotoBon() {
+  if (!window._bonPhotoData) return;
+  const btn = document.getElementById('bon-photo-analyse-btn');
+  btn.textContent = '⏳ Analyse en cours…';
+  btn.disabled = true;
+
+  const corrections = await chargerCorrections();
+  const correctionsPrompt = buildCorrectionsPrompt(corrections);
+
+  const prompt = `Tu analyses une feuille SODIMAS de mouvement de stock.
+
+INFORMATIONS À EXTRAIRE :
+1. Type de mouvement coché : "reception" (Réception/entrée), "sortie" (Sortie/Enlèvement), ou "preparation" (Préparation commande)
+2. Date (format YYYY-MM-DD)
+3. Destinataire/Expéditeur
+4. Numéro de commande / Réf. client (si présent)
+5. Toutes les lignes du tableau
+
+RÉFÉRENCES — format à reconstituer :
+- "35/530/75" → "35SO530E00075"
+- "36/570/13" → "36SO570E00013"
+- "38/70/73" → "38SO070E00073"
+- "32/40/3015" → "32SO040E03015"
+- Format : [2 chiffres]SO[3 chiffres]E[5 chiffres] avec zéros de remplissage
+- " ou // = même référence que la ligne précédente
+
+ZONES : D2A3 = depot "2" rangee "A3", RENO 3 = depot "RENO" rangee "3", QUAI SODI 1 = depot "QUAI SODIMAS" rangee "1"
+
+QUANTITÉS : chiffres arabes normaux sur cette feuille (pas de bâtons)
+
+Retourne UNIQUEMENT un JSON valide :
+{
+  "type": "preparation",
+  "date": "2026-07-07",
+  "destinataire": "LUDO",
+  "numero_commande": null,
+  "lignes": [
+    {"reference": "35SO530E00075", "lot": "4500221801", "quantite": 1, "depot": "2", "rangee": "A3", "remarque": null}
+  ]
+}${correctionsPrompt}`;
+
+  try {
+    const response = await fetch('/.netlify/functions/analyse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 4000,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: window._bonPhotoData.mediaType, data: window._bonPhotoData.base64 } },
+            { type: 'text', text: prompt }
+          ]
+        }]
+      })
+    });
+
+    const data = await response.json();
+    if (data.error) throw new Error(JSON.stringify(data.error));
+    const text = data.content?.map(c => c.text || '').join('').trim();
+
+    const firstBracket = text.indexOf('{');
+    const lastBracket = text.lastIndexOf('}');
+    if (firstBracket === -1) throw new Error('JSON introuvable');
+    const result = JSON.parse(text.slice(firstBracket, lastBracket + 1));
+
+    closeModal();
+    afficherVerificationBon(result);
+
+  } catch(e) {
+    toast('Erreur : ' + e.message, 'error');
+    btn.textContent = '🔍 Analyser la photo';
+    btn.disabled = false;
+  }
+}
+
+let _bonPhotoResult = null;
+
+function afficherVerificationBon(result) {
+  _bonPhotoResult = result;
+  const el = document.getElementById('page-bons');
+
+  const typeLabel = result.type === 'reception' ? '📥 Réception (Entrée)' :
+                    result.type === 'sortie' ? '📤 Sortie / Enlèvement' : '📋 Préparation commande';
+  const typeBadge = result.type === 'reception' ? 'badge-entree' :
+                    result.type === 'sortie' ? 'badge-sortie' : 'badge-deplacement';
+
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;gap:.8rem;margin-bottom:1rem;flex-wrap:wrap">
+      <button class="btn-secondary btn-sm" onclick="renderBons()">← Retour</button>
+      <h2 style="font-size:1rem;font-weight:600;flex:1">Vérification — Import par photo</h2>
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-header"><div class="card-title">Informations générales</div></div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Type de mouvement</label>
+          <select id="vbon-type" style="font-size:.9rem">
+            <option value="preparation" ${result.type === 'preparation' ? 'selected' : ''}>📋 Préparation commande</option>
+            <option value="sortie" ${result.type === 'sortie' ? 'selected' : ''}>📤 Sortie / Enlèvement</option>
+            <option value="reception" ${result.type === 'reception' ? 'selected' : ''}>📥 Réception (Entrée)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Date</label>
+          <input type="date" id="vbon-date" value="${result.date || new Date().toISOString().slice(0,10)}" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Destinataire *</label>
+          <input type="text" id="vbon-dest" value="${result.destinataire || ''}" placeholder="ex: LUDO, SODIMAS…" />
+        </div>
+        <div class="form-group">
+          <label>N° commande / Réf. client</label>
+          <input type="text" id="vbon-cmd" value="${result.numero_commande || ''}" />
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-header">
+        <div class="card-title">Lignes — ${result.lignes?.length || 0} article${(result.lignes?.length || 0) > 1 ? 's' : ''}</div>
+        <button class="btn-secondary btn-sm" onclick="ajouterLigneBonPhoto()">+ Ligne</button>
+      </div>
+
+      <!-- Vue tableau desktop -->
+      <div class="table-wrapper stock-table-view">
+        <table>
+          <thead><tr>
+            <th>Référence</th><th>Lot</th><th>Qté</th><th>Dépôt</th><th>Rangée</th><th>Remarque</th><th></th>
+          </tr></thead>
+          <tbody id="vbon-tbody">
+            ${(result.lignes || []).map((l, i) => `
+              <tr>
+                <td><input type="text" value="${l.reference || ''}" onchange="_bonPhotoResult.lignes[${i}].reference=this.value" style="width:100%;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.82rem;font-family:monospace" /></td>
+                <td><input type="text" value="${l.lot || ''}" onchange="_bonPhotoResult.lignes[${i}].lot=this.value" style="width:100%;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.82rem;font-family:monospace" /></td>
+                <td><input type="number" value="${l.quantite ?? 1}" min="1" onchange="_bonPhotoResult.lignes[${i}].quantite=parseFloat(this.value)" style="width:60px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.85rem" /></td>
+                <td><input type="text" value="${l.depot || ''}" onchange="_bonPhotoResult.lignes[${i}].depot=this.value" style="width:70px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.85rem" /></td>
+                <td><input type="text" value="${l.rangee || ''}" onchange="_bonPhotoResult.lignes[${i}].rangee=this.value" style="width:70px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.85rem" /></td>
+                <td><input type="text" value="${l.remarque || ''}" onchange="_bonPhotoResult.lignes[${i}].remarque=this.value" style="width:100%;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.82rem" placeholder="remarque…" /></td>
+                <td><button class="btn-danger btn-sm" onclick="_bonPhotoResult.lignes.splice(${i},1);afficherVerificationBon(_bonPhotoResult)">✕</button></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Vue cartes mobile -->
+      <div class="stock-card-view">
+        ${(result.lignes || []).map((l, i) => `
+          <div class="import-card">
+            <div class="import-card-header">
+              <span style="font-weight:600;font-size:.9rem">${l.reference || '—'}</span>
+              <button class="btn-danger btn-sm" onclick="_bonPhotoResult.lignes.splice(${i},1);afficherVerificationBon(_bonPhotoResult)">✕</button>
+            </div>
+            <div class="form-group" style="margin-bottom:.5rem"><label>Référence</label>
+              <input type="text" value="${l.reference || ''}" onchange="_bonPhotoResult.lignes[${i}].reference=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem;font-family:monospace" /></div>
+            <div class="form-row">
+              <div class="form-group" style="margin-bottom:.5rem"><label>Lot</label>
+                <input type="text" value="${l.lot || ''}" onchange="_bonPhotoResult.lignes[${i}].lot=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.88rem;font-family:monospace" /></div>
+              <div class="form-group" style="margin-bottom:.5rem"><label>Qté</label>
+                <input type="number" value="${l.quantite ?? 1}" min="1" onchange="_bonPhotoResult.lignes[${i}].quantite=parseFloat(this.value)" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" /></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group" style="margin-bottom:0"><label>Dépôt</label>
+                <input type="text" value="${l.depot || ''}" onchange="_bonPhotoResult.lignes[${i}].depot=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" /></div>
+              <div class="form-group" style="margin-bottom:0"><label>Rangée</label>
+                <input type="text" value="${l.rangee || ''}" onchange="_bonPhotoResult.lignes[${i}].rangee=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" /></div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button class="btn-success" onclick="validerImportBonPhoto()">✓ Valider</button>
+      <button class="btn-secondary" onclick="renderBons()">Annuler</button>
+    </div>
+  `;
+}
+
+function ajouterLigneBonPhoto() {
+  _bonPhotoResult.lignes.push({ reference: '', lot: '', quantite: 1, depot: '', rangee: '', remarque: '' });
+  afficherVerificationBon(_bonPhotoResult);
+}
+
+async function validerImportBonPhoto() {
+  const type = document.getElementById('vbon-type').value;
+  const date = document.getElementById('vbon-date').value;
+  const dest = document.getElementById('vbon-dest').value.trim();
+  const cmd = document.getElementById('vbon-cmd').value.trim();
+  const lignes = _bonPhotoResult.lignes.filter(l => l.reference);
+
+  if (!dest) { toast('Le destinataire est obligatoire.', 'error'); return; }
+  if (!lignes.length) { toast('Aucune ligne à importer.', 'error'); return; }
+
+  if (type === 'preparation') {
+    // Créer un bon de préparation
+    const { data: bon, error } = await sb.from('bons_preparation').insert({
+      date_prevue: date,
+      destinataire: dest,
+      remarque: cmd ? `N° commande : ${cmd}` : null,
+      statut: 'en_cours',
+      created_by: currentProfile?.prenom || currentUser?.email
+    }).select().single();
+
+    if (error) { toast('Erreur : ' + error.message, 'error'); return; }
+
+    // Ajouter les lignes — chercher chaque article dans le stock
+    for (const l of lignes) {
+      let q = sb.from('stock').select('id').eq('reference', l.reference);
+      if (l.lot) q = q.eq('lot', l.lot); else q = q.is('lot', null);
+      if (l.depot) q = q.eq('depot', l.depot);
+      if (l.rangee) q = q.eq('rangee', l.rangee);
+      const { data: stockRows } = await q.limit(1);
+      const stockId = stockRows?.[0]?.id || null;
+
+      await sb.from('bon_lignes').insert({
+        bon_id: bon.id,
+        stock_id: stockId,
+        reference: l.reference,
+        lot: l.lot || null,
+        depot: l.depot || null,
+        rangee: l.rangee || null,
+        remarque: l.remarque || null,
+        quantite: l.quantite,
+        added_by: currentProfile?.prenom || currentUser?.email
+      });
+
+      // Réserver le stock si disponible
+      if (stockId) {
+        const { data: sr } = await sb.from('stock').select('quantite_reservee').eq('id', stockId).single();
+        await sb.from('stock').update({
+          quantite_reservee: (sr?.quantite_reservee || 0) + l.quantite
+        }).eq('id', stockId);
+      }
+    }
+
+    toast(`Bon de préparation créé — ${lignes.length} ligne${lignes.length > 1 ? 's' : ''} !`);
+    openBon(bon.id);
+
+  } else {
+    // Import entrée ou sortie (réutilise validateImport)
+    importRows = lignes.map(l => ({ ...l }));
+    importRowsOriginal = [...importRows];
+    currentImportType = type === 'reception' ? 'entree' : 'sortie';
+
+    // Créer la session
+    const { data: session } = await sb.from('sessions_import').insert({
+      type: currentImportType,
+      date_import: date,
+      nb_lignes: lignes.length,
+      auteur: currentProfile?.prenom || currentUser?.email
+    }).select().single();
+
+    const sessionId = session?.id || null;
+    const auteur = currentProfile?.prenom || currentUser?.email;
+    let ok = 0;
+
+    for (const row of importRows) {
+      if (!row.reference || !row.quantite) continue;
+
+      if (currentImportType === 'sortie') {
+        let q = sb.from('stock').select('id, quantite').eq('reference', row.reference);
+        q = row.lot ? q.eq('lot', row.lot) : q.is('lot', null);
+        const { data: existing } = await q.limit(1);
+        if (existing?.[0]) {
+          await sb.from('stock').update({ quantite: existing[0].quantite - row.quantite, updated_at: new Date().toISOString() }).eq('id', existing[0].id);
+        }
+      } else {
+        let q = sb.from('stock').select('id, quantite, remarque').eq('reference', row.reference);
+        q = row.lot ? q.eq('lot', row.lot) : q.is('lot', null);
+        q = row.depot ? q.eq('depot', row.depot) : q.is('depot', null);
+        q = row.rangee ? q.eq('rangee', row.rangee) : q.is('rangee', null);
+        q = row.conditionnement ? q.eq('conditionnement', row.conditionnement) : q.is('conditionnement', null);
+        const { data: existing } = await q.limit(1);
+        if (existing?.[0]) {
+          await sb.from('stock').update({ quantite: existing[0].quantite + row.quantite, updated_at: new Date().toISOString() }).eq('id', existing[0].id);
+        } else {
+          await sb.from('stock').insert({ reference: row.reference, lot: row.lot || null, depot: row.depot || null, rangee: row.rangee || null, remarque: row.remarque || null, quantite: row.quantite, quantite_reservee: 0 });
+        }
+      }
+
+      await sb.from('mouvements').insert({
+        date_mouvement: date, type_mouvement: currentImportType,
+        reference: row.reference, lot: row.lot || null,
+        depot: row.depot || null, rangee: row.rangee || null,
+        quantite: row.quantite, auteur, source: 'import_photo',
+        remarque: row.remarque || null, session_id: sessionId
+      });
+      ok++;
+    }
+
+    if (sessionId) await sb.from('sessions_import').update({ nb_lignes: ok }).eq('id', sessionId);
+    toast(`${ok} ligne${ok > 1 ? 's' : ''} importée${ok > 1 ? 's' : ''} !`);
+    renderBons();
+  }
 }
 
 function openNewBonModal() {
