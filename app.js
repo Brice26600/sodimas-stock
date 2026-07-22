@@ -769,10 +769,8 @@ async function renderSortie() {
         <div id="s-results"></div>
         <div id="s-form" class="hidden">
           <div class="form-section-title">Sortie</div>
-          <div id="s-article-info" style="background:var(--accent-light);border-radius:var(--radius-sm);padding:.8rem;margin-bottom:1rem;font-size:.88rem"></div>
+          <div id="s-article-info" style="background:var(--accent-light);border-radius:var(--radius-sm);padding:.8rem;margin-bottom:1rem;font-size:.88rem;color:var(--text-secondary)"></div>
           <div class="form-row">
-            <div class="form-group"><label>Quantité sortante *</label>
-              <input type="number" id="s-qte" min="1" value="1" /></div>
             <div class="form-group"><label>Date de sortie</label>
               <input type="date" id="s-date" value="${new Date().toISOString().slice(0,10)}" /></div>
           </div>
@@ -803,6 +801,7 @@ function showSortieTab(tab) {
 
 let selectedStockRow = null;
 let sortieDebounce = null;
+let sortieSelection = {};
 
 async function searchStockForSortie() {
   const q = document.getElementById('s-search').value.trim();
@@ -814,78 +813,132 @@ async function searchStockForSortie() {
     const { data } = await sb.from('stock')
       .select('*')
       .or(`reference.ilike.%${q}%,lot.ilike.%${q}%`)
-      .gt('quantite', 0)
       .order('reference')
-      .limit(10);
+      .order('quantite', { ascending: false })
+      .limit(20);
 
-    if (!data?.length) { res.innerHTML = `<p style="font-size:.85rem;color:var(--text-secondary);margin:.5rem 0">Aucun article trouvé.</p>`; return; }
+    if (!data?.length) {
+      res.innerHTML = `<p style="font-size:.85rem;color:var(--text-secondary);margin:.5rem 0">Aucun article trouvé.</p>`;
+      return;
+    }
 
-    res.innerHTML = `<div class="table-wrapper"><table>
-      <thead><tr><th>Référence</th><th>Lot</th><th>Dépôt</th><th>Rangée</th><th>Qté dispo</th><th></th></tr></thead>
-      <tbody>${data.map(r => `
-        <tr>
-          <td class="td-ref">${fmt(r.reference)}</td>
-          <td class="td-lot">${fmt(r.lot)}</td>
-          <td>${badgeDepot(r.depot)}</td>
-          <td>${fmt(r.rangee)}</td>
-          <td class="td-qte">${r.quantite}</td>
-          <td><button class="btn-primary btn-sm" onclick='selectForSortie(${JSON.stringify(r).replace(/'/g,"&#39;")})'>Sélectionner</button></td>
-        </tr>
-      `).join('')}</tbody>
-    </table></div>`;
+    // Grouper par référence
+    const grouped = {};
+    data.forEach(r => {
+      if (!grouped[r.reference]) grouped[r.reference] = [];
+      grouped[r.reference].push(r);
+    });
+
+    res.innerHTML = Object.entries(grouped).map(([ref, rows]) => `
+      <div class="card" style="margin-bottom:.8rem;padding:1rem">
+        <div style="font-weight:700;font-size:.95rem;font-family:monospace;margin-bottom:.8rem;color:var(--accent)">${ref}</div>
+        <div class="table-wrapper stock-table-view">
+          <table>
+            <thead><tr><th>Lot</th><th>Dépôt</th><th>Rangée</th><th>Stock dispo</th><th>Qté à sortir</th></tr></thead>
+            <tbody>
+              ${rows.map(r => {
+                const dispo = r.quantite - (r.quantite_reservee || 0);
+                const couleur = dispo <= 0 ? 'var(--danger)' : dispo < 3 ? 'var(--warning)' : 'var(--success)';
+                return `<tr>
+                  <td class="td-lot">${fmt(r.lot)}</td>
+                  <td>${badgeDepot(r.depot)}</td>
+                  <td>${fmt(r.rangee)}</td>
+                  <td style="font-size:1rem;font-weight:700;color:${couleur};text-align:center">${dispo}</td>
+                  <td>
+                    <input type="number" id="sortie-qte-${r.id}" min="0" value="0"
+                      style="width:70px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem"
+                      onchange="updateSortieSelection('${r.id}', this.value, ${JSON.stringify(r).replace(/'/g,"&#39;")})" />
+                  </td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+        <!-- Vue cartes mobile -->
+        <div class="stock-card-view">
+          ${rows.map(r => {
+            const dispo = r.quantite - (r.quantite_reservee || 0);
+            const couleur = dispo <= 0 ? 'var(--danger)' : dispo < 3 ? 'var(--warning)' : 'var(--success)';
+            return `<div class="import-card" style="border-left:4px solid ${couleur}">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
+                <span class="td-lot">${fmt(r.lot) || 'Sans lot'}</span>
+                <span style="font-size:1rem;font-weight:700;color:${couleur}">${dispo} dispo</span>
+              </div>
+              <div style="font-size:.82rem;color:var(--text-secondary);margin-bottom:.5rem">${r.depot || '—'} / ${r.rangee || '—'}</div>
+              <div style="display:flex;align-items:center;gap:.5rem">
+                <label style="font-size:.85rem">Qté à sortir :</label>
+                <input type="number" id="sortie-qte-${r.id}" min="0" value="0"
+                  style="width:70px;padding:.4rem .5rem;border:1.5px solid var(--border);border-radius:4px"
+                  onchange="updateSortieSelection('${r.id}', this.value, ${JSON.stringify(r).replace(/'/g,"&#39;")})" />
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+    `).join('');
+
+    // Afficher le formulaire de validation
+    document.getElementById('s-form').classList.remove('hidden');
+    document.getElementById('s-article-info').innerHTML = `
+      Saisissez les quantités à sortir pour chaque lot, puis validez.
+    `;
   }, 300);
 }
 
-function selectForSortie(row) {
-  selectedStockRow = row;
-  document.getElementById('s-results').innerHTML = '';
-  document.getElementById('s-search').value = '';
-  document.getElementById('s-article-info').innerHTML = `
-    <strong>${row.reference}</strong>${row.lot ? ` — Lot ${row.lot}` : ''}<br/>
-    Dépôt : <strong>${row.depot || '—'}</strong> | Rangée : <strong>${row.rangee || '—'}</strong> | Stock disponible : <strong>${row.quantite}</strong>
-  `;
-  document.getElementById('s-qte').max = row.quantite;
-  document.getElementById('s-form').classList.remove('hidden');
+function updateSortieSelection(stockId, qte, row) {
+  const q = parseFloat(qte) || 0;
+  if (q > 0) {
+    sortieSelection[stockId] = { row, qte: q };
+  } else {
+    delete sortieSelection[stockId];
+  }
 }
 
 function cancelSortie() {
   selectedStockRow = null;
+  sortieSelection = {};
   document.getElementById('s-form').classList.add('hidden');
   document.getElementById('s-search').value = '';
   document.getElementById('s-results').innerHTML = '';
 }
 
 async function saveSortie() {
-  if (!selectedStockRow) return;
-  const qte = parseFloat(document.getElementById('s-qte').value);
   const date = document.getElementById('s-date').value;
   const remarque = document.getElementById('s-remarque').value.trim();
-  const r = selectedStockRow;
+  const auteur = currentProfile?.prenom || currentUser?.email;
 
-  if (!qte || qte <= 0) { toast('Quantité invalide.', 'error'); return; }
+  // Vérifier qu'il y a au moins une ligne sélectionnée
+  const lignes = Object.values(sortieSelection);
+  if (!lignes.length) { toast('Saisissez au moins une quantité à sortir.', 'error'); return; }
 
-  // Si stock insuffisant, proposer une sortie forcée
-  if (qte > r.quantite) {
-    const forcer = confirm(`⚠️ Stock insuffisant — le système indique ${r.quantite} unité${r.quantite > 1 ? 's' : ''} disponible${r.quantite > 1 ? 's' : ''}.\n\nVoulez-vous forcer la sortie de ${qte} unités quand même ?\n(Le stock passera en négatif — écart à régulariser)`);
-    if (!forcer) return;
+  // Protection anti-double-clic
+  const btn = document.querySelector('#s-form .btn-danger');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Enregistrement…'; }
+
+  let ok = 0;
+  for (const { row: r, qte } of lignes) {
+    if (!qte || qte <= 0) continue;
+
+    // Si stock insuffisant, demander confirmation
+    if (qte > r.quantite) {
+      const forcer = confirm(`⚠️ Stock insuffisant pour ${r.reference} lot ${r.lot || '—'} — ${r.quantite} disponible(s).\n\nForcer la sortie de ${qte} unités quand même ?`);
+      if (!forcer) continue;
+    }
+
+    const newQte = r.quantite - qte;
+    await sb.from('stock').update({
+      quantite: newQte, updated_at: new Date().toISOString()
+    }).eq('id', r.id);
+
+    await sb.from('mouvements').insert({
+      date_mouvement: date, type_mouvement: 'sortie',
+      reference: r.reference, lot: r.lot, depot: r.depot, rangee: r.rangee,
+      quantite: qte, remarque: remarque || null, auteur, source: 'app'
+    });
+    ok++;
   }
 
-  const newQte = r.quantite - qte; // peut être négatif
-  const { error } = await sb.from('stock').update({
-    quantite: newQte, updated_at: new Date().toISOString()
-  }).eq('id', r.id);
-
-  if (error) { toast('Erreur : ' + error.message, 'error'); return; }
-
-  await sb.from('mouvements').insert({
-    date_mouvement: date, type_mouvement: 'sortie',
-    reference: r.reference, lot: r.lot, depot: r.depot, rangee: r.rangee,
-    quantite: qte, remarque: remarque || null,
-    auteur: currentProfile?.prenom || currentUser?.email,
-    source: 'app'
-  });
-
-  toast(`Sortie enregistrée : ${qte} × ${r.reference}`);
+  toast(`${ok} sortie${ok > 1 ? 's' : ''} enregistrée${ok > 1 ? 's' : ''} !`);
   cancelSortie();
 }
 
