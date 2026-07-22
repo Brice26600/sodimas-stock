@@ -1518,8 +1518,10 @@ async function analyseInvPhoto() {
 
   const prompt = `Tu analyses une feuille manuscrite d'inventaire de stock pour un entrepôt d'ascenseurs.
 
-RÉFÉRENCES : x35/530/67 → 35SO530E00067, x36/570/09 → 36SO570E00009, x38/70/30 → 38SO070E00030
-Format : [2 chiffres]SO[3 chiffres]E[5 chiffres], zéros de remplissage à gauche. Ignorer le préfixe x/y/v.
+RÉFÉRENCES : 
+- x35/530/67 → 35SO530E00067, x36/570/09 → 36SO570E00009, x38/70/30 → 38SO070E00030
+- Nouveau format avec P : 33/70P/3047 → 33SO070P03047, 38/20P/04 → 38SO020P00004
+- Format général : [2ch]SO[3ch avec zéros]E ou P[5ch avec zéros]. Ignorer le préfixe x/y/v.
 
 NUMÉROS DE LOT : "7" et "9" souvent confondus. 7 = trait horizontal haut + descend droit. 9 = boucle fermée en haut.
 
@@ -1529,8 +1531,13 @@ QUANTITÉS — notation mixte, TRÈS IMPORTANT, les symboles s'ADDITIONNENT :
 - Π ≠ Γ : Π a deux traits verticaux reliés en haut (=3) ; Γ a un seul trait avec crochet (=2)
 - Additionne TOUS les symboles présents pour une ligne, ne prends pas juste le dernier
 
-ZONES : D2A6 = Dépôt "2" Rangée "6", RENO 3 = Dépôt "RENO" Rangée "3"
-" = même référence que la ligne précédente. Accolade } = zone commune à toutes les lignes groupées.
+ZONES : 
+- D2A6 = Dépôt "2" Rangée "6" (le A devant le numéro de rangée est ignoré)
+- D2 A11 = Dépôt "2" Rangée "11" (ignorer le A, garder juste le numéro)
+- RENO 3 = Dépôt "RENO" Rangée "3"
+- QUAI SODIMAS 1 = Dépôt "QUAI SODIMAS" Rangée "1"
+- Règle générale : si rangée = lettre + chiffre(s), ne garder que le(s) chiffre(s)
+- " = même référence que la ligne précédente. Accolade } = zone commune.
 
 CONDITIONNEMENT : si la feuille précise palette/caisse/colis/pièce (ex: "2 PAL", "5 colis"), extraire ce mot dans le champ conditionnement, sinon null. Si une même référence+lot apparaît avec des conditionnements DIFFÉRENTS sur la feuille, crée une ligne JSON distincte pour chacun (ne pas additionner).
 
@@ -1863,11 +1870,9 @@ async function analyseImportPhoto(type) {
   const prompt = `Tu analyses une feuille manuscrite de gestion de stock pour un entrepôt d'ascenseurs.
 
 RÉFÉRENCES — format exact à reconstituer :
-- "x35/530/67" → "35SO530E00067"
-- "x36/570/09" → "36SO570E00009"
-- "x38/70/30" → "38SO070E00030" (70 devient 070 avec zéro de remplissage)
-- Le préfixe x/y/v/etc = coche à ignorer
-- Format : [2 chiffres]SO[3 chiffres]E[5 chiffres], avec zéros de remplissage à gauche
+- "x35/530/67" → "35SO530E00067", "x38/70/30" → "38SO070E00030"
+- Nouveau format avec P : "33/70P/3047" → "33SO070P03047", "38/20P/04" → "38SO020P00004"
+- Format général : [2ch]SO[3ch avec zéros]E ou P[5ch avec zéros]. Ignorer le préfixe x/y/v.
 
 NUMÉROS DE LOT :
 - "7" et "9" souvent confondus : 7 = barre horizontale en haut + trait droit ; 9 = boucle fermée en haut
@@ -1879,20 +1884,21 @@ QUANTITÉS — notation mixte, TRÈS IMPORTANT :
 - Exemples de combinaisons : □barré + I = 6, □barré + II = 7, □barré + III = 8, □barré + Γ = 7, □ + Γ = 6
 - Π (portique) ≠ Γ (équerre) : Π a DEUX traits verticaux reliés en haut = 3 ; Γ a UN trait vertical avec crochet = 2
 - Compte chaque symbole séparément puis additionne
-- En cas de doute entre Γ (2) et Π (3), regarde si il y a un trait vertical à droite relié en haut
 
 ZONES :
-- "D2A6" = Dépôt "2" Rangée "6"
+- "D2A6" = Dépôt "2" Rangée "6" (le A devant le numéro de rangée est ignoré)
+- "D2 A11" = Dépôt "2" Rangée "11" (ignorer le A, garder juste le numéro)
 - "RENO 8" = Dépôt "RENO" Rangée "8"
-- "RACK D2" = Dépôt "2" Rangée "RACK"
+- "QUAI SODIMAS 1" = Dépôt "QUAI SODIMAS" Rangée "1"
+- Règle générale : si rangée = lettre + chiffre(s), ne garder que le(s) chiffre(s)
 
 AUTRES RÈGLES :
 - x/coches = référence préparée, garde la ligne mais ignore la coche
 - " ou // = même référence que la ligne du dessus
 - Accolade } = zone s'applique à toutes les lignes regroupées
 - Colonne REMARQUE : noter tout commentaire écrit dans cette colonne
-- CONDITIONNEMENT : si la feuille précise palette/caisse/colis/pièce (ex: "2 PAL", "5 colis", "1 caisse"), extraire ce mot dans le champ conditionnement. Si rien n'est précisé, mets null.
-- Si une même référence+lot apparaît sur plusieurs lignes avec des conditionnements DIFFÉRENTS (ex: 2 palettes ET 5 colis séparés), créer une ligne JSON distincte pour chaque conditionnement, ne pas les additionner.
+- CONDITIONNEMENT : si la feuille précise palette/caisse/colis/pièce, extraire dans conditionnement, sinon null.
+- Si même référence+lot avec conditionnements DIFFÉRENTS → créer une ligne JSON distincte pour chaque.
 
 Retourne UNIQUEMENT un JSON valide :
 [{"reference": "35SO530E00067", "lot": "4500224268", "quantite": 1, "conditionnement": null, "depot": "2", "rangee": "6", "remarque": null}, ...]
@@ -2360,10 +2366,16 @@ RÉFÉRENCES — format à reconstituer :
 - "36/570/13" → "36SO570E00013"
 - "38/70/73" → "38SO070E00073"
 - "32/40/3015" → "32SO040E03015"
-- Format : [2 chiffres]SO[3 chiffres]E[5 chiffres] avec zéros de remplissage
+- Nouveau format avec P : "33/70P/3047" → "33SO070P03047", "38/20P/04" → "38SO020P00004"
+- Format général : [2ch]SO[3ch avec zéros]E ou P[5ch avec zéros]
 - " ou // = même référence que la ligne précédente
 
-ZONES : D2A3 = depot "2" rangee "A3", RENO 3 = depot "RENO" rangee "3", QUAI SODI 1 = depot "QUAI SODIMAS" rangee "1"
+ZONES : 
+- D2A3 = depot "2" rangee "3" (le A devant le numéro est ignoré)
+- D2 A11 = depot "2" rangee "11" (ignorer le A, garder juste le numéro)
+- RENO 3 = depot "RENO" rangee "3"
+- QUAI SODI 1 = depot "QUAI SODIMAS" rangee "1"
+- Règle générale : si rangée = lettre + chiffre(s), ne garder que le(s) chiffre(s)
 
 QUANTITÉS : chiffres arabes normaux sur cette feuille (pas de bâtons)
 
