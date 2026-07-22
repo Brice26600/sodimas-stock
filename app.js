@@ -2416,9 +2416,25 @@ Retourne UNIQUEMENT un JSON valide :
 
 let _bonPhotoResult = null;
 
-function afficherVerificationBon(result) {
+async function afficherVerificationBon(result) {
   _bonPhotoResult = result;
   const el = document.getElementById('page-bons');
+
+  // Vérifier le stock pour chaque ligne
+  const lignesAvecStock = await Promise.all((result.lignes || []).map(async (l, i) => {
+    if (!l.reference) return { ...l, dispo: null };
+    let q = sb.from('stock').select('quantite, quantite_reservee').eq('reference', l.reference);
+    if (l.lot) q = q.eq('lot', l.lot); else q = q.is('lot', null);
+    if (l.depot) q = q.eq('depot', l.depot);
+    if (l.rangee) q = q.eq('rangee', l.rangee);
+    const { data } = await q.limit(1);
+    const row = data?.[0];
+    const dispo = row ? row.quantite - (row.quantite_reservee || 0) : null;
+    return { ...l, dispo };
+  }));
+
+  // Mettre à jour les lignes avec les stocks
+  result.lignes = lignesAvecStock;
 
   const typeLabel = result.type === 'reception' ? '📥 Réception (Entrée)' :
                     result.type === 'sortie' ? '📤 Sortie / Enlèvement' : '📋 Préparation commande';
@@ -2462,38 +2478,54 @@ function afficherVerificationBon(result) {
     <div class="card" style="margin-bottom:1rem">
       <div class="card-header">
         <div class="card-title">Lignes — ${result.lignes?.length || 0} article${(result.lignes?.length || 0) > 1 ? 's' : ''}</div>
-        <button class="btn-secondary btn-sm" onclick="ajouterLigneBonPhoto()">+ Ligne</button>
+        <div style="display:flex;gap:.5rem">
+          <button class="btn-secondary btn-sm" onclick="verifierStockBonPhoto()">🔄 Vérifier stock</button>
+          <button class="btn-secondary btn-sm" onclick="ajouterLigneBonPhoto()">+ Ligne</button>
+        </div>
       </div>
 
       <!-- Vue tableau desktop -->
       <div class="table-wrapper stock-table-view">
         <table>
           <thead><tr>
-            <th>Référence</th><th>Lot</th><th>Qté</th><th>Dépôt</th><th>Rangée</th><th>Remarque</th><th></th>
+            <th>Référence</th><th>Lot</th><th>Qté dem.</th><th>Dépôt</th><th>Rangée</th><th>Remarque</th><th>Stock dispo</th><th></th>
           </tr></thead>
           <tbody id="vbon-tbody">
-            ${(result.lignes || []).map((l, i) => `
-              <tr>
+            ${(result.lignes || []).map((l, i) => {
+              const dispo = l.dispo;
+              const couleur = dispo === null ? 'var(--text-secondary)' :
+                              dispo === 0 ? 'var(--danger)' :
+                              dispo < l.quantite ? 'var(--warning)' : 'var(--success)';
+              const dispoLabel = dispo === null ? '—' : dispo;
+              return `<tr>
                 <td><input type="text" value="${l.reference || ''}" onchange="_bonPhotoResult.lignes[${i}].reference=this.value" style="width:100%;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.82rem;font-family:monospace" /></td>
                 <td><input type="text" value="${l.lot || ''}" onchange="_bonPhotoResult.lignes[${i}].lot=this.value" style="width:100%;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.82rem;font-family:monospace" /></td>
                 <td><input type="number" value="${l.quantite ?? 1}" min="1" onchange="_bonPhotoResult.lignes[${i}].quantite=parseFloat(this.value)" style="width:60px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.85rem" /></td>
                 <td><input type="text" value="${l.depot || ''}" onchange="_bonPhotoResult.lignes[${i}].depot=this.value" style="width:70px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.85rem" /></td>
                 <td><input type="text" value="${l.rangee || ''}" onchange="_bonPhotoResult.lignes[${i}].rangee=this.value" style="width:70px;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.85rem" /></td>
-                <td><input type="text" value="${l.remarque || ''}" onchange="_bonPhotoResult.lignes[${i}].remarque=this.value" style="width:100%;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.82rem" placeholder="remarque…" /></td>
+                <td><input type="text" value="${l.remarque || ''}" onchange="_bonPhotoResult.lignes[${i}].remarque=this.value" style="width:100%;padding:.3rem .5rem;border:1.5px solid var(--border);border-radius:4px;font-size:.82rem" /></td>
+                <td style="font-size:1rem;font-weight:700;color:${couleur};text-align:center">${dispoLabel}</td>
                 <td><button class="btn-danger btn-sm" onclick="_bonPhotoResult.lignes.splice(${i},1);afficherVerificationBon(_bonPhotoResult)">✕</button></td>
-              </tr>
-            `).join('')}
+              </tr>`;
+            }).join('')}
           </tbody>
         </table>
       </div>
 
       <!-- Vue cartes mobile -->
       <div class="stock-card-view">
-        ${(result.lignes || []).map((l, i) => `
-          <div class="import-card">
+        ${(result.lignes || []).map((l, i) => {
+          const dispo = l.dispo;
+          const couleur = dispo === null ? 'var(--text-secondary)' :
+                          dispo === 0 ? 'var(--danger)' :
+                          dispo < l.quantite ? 'var(--warning)' : 'var(--success)';
+          return `<div class="import-card" style="border-left:4px solid ${couleur}">
             <div class="import-card-header">
               <span style="font-weight:600;font-size:.9rem">${l.reference || '—'}</span>
-              <button class="btn-danger btn-sm" onclick="_bonPhotoResult.lignes.splice(${i},1);afficherVerificationBon(_bonPhotoResult)">✕</button>
+              <div style="display:flex;align-items:center;gap:.5rem">
+                <span style="font-size:1rem;font-weight:700;color:${couleur}">${dispo !== null ? dispo + ' dispo' : '—'}</span>
+                <button class="btn-danger btn-sm" onclick="_bonPhotoResult.lignes.splice(${i},1);afficherVerificationBon(_bonPhotoResult)">✕</button>
+              </div>
             </div>
             <div class="form-group" style="margin-bottom:.5rem"><label>Référence</label>
               <input type="text" value="${l.reference || ''}" onchange="_bonPhotoResult.lignes[${i}].reference=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem;font-family:monospace" /></div>
@@ -2509,8 +2541,8 @@ function afficherVerificationBon(result) {
               <div class="form-group" style="margin-bottom:0"><label>Rangée</label>
                 <input type="text" value="${l.rangee || ''}" onchange="_bonPhotoResult.lignes[${i}].rangee=this.value" style="width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:4px;font-size:.9rem" /></div>
             </div>
-          </div>
-        `).join('')}
+          </div>`;
+        }).join('')}
       </div>
     </div>
 
@@ -2519,6 +2551,12 @@ function afficherVerificationBon(result) {
       <button class="btn-secondary" onclick="renderBons()">Annuler</button>
     </div>
   `;
+}
+
+async function verifierStockBonPhoto() {
+  // Récupère les valeurs actuelles des champs avant de recalculer
+  toast('Vérification en cours…');
+  await afficherVerificationBon(_bonPhotoResult);
 }
 
 function ajouterLigneBonPhoto() {
@@ -2846,9 +2884,18 @@ async function searchStockForBon(bonId) {
   if (q.length < 2) { res.innerHTML = ''; return; }
 
   bonSearchDebounce = setTimeout(async () => {
-    const { data } = await sb.from('stock').select('*')
+    const { data: rawData } = await sb.from('stock').select('*')
       .or(`reference.ilike.%${q}%,lot.ilike.%${q}%,depot.ilike.%${q}%,rangee.ilike.%${q}%,remarque.ilike.%${q}%,conditionnement.ilike.%${q}%`)
-      .order('reference').limit(15);
+      .order('reference').limit(30);
+
+    // Trier : stock > 0 en premier, puis par quantité décroissante
+    const data = (rawData || []).sort((a, b) => {
+      const da = a.quantite - (a.quantite_reservee || 0);
+      const db = b.quantite - (b.quantite_reservee || 0);
+      if (da > 0 && db <= 0) return -1;
+      if (db > 0 && da <= 0) return 1;
+      return db - da;
+    }).slice(0, 15);
 
     if (!data?.length) {
       res.innerHTML = `<p style="font-size:.85rem;color:var(--text-secondary);margin:.5rem 0">
