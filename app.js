@@ -1571,10 +1571,16 @@ async function analyseInvPhoto() {
 
   const prompt = `Tu analyses une feuille manuscrite d'inventaire de stock pour un entrepôt d'ascenseurs.
 
-RÉFÉRENCES : 
-- x35/530/67 → 35SO530E00067, x36/570/09 → 36SO570E00009, x38/70/30 → 38SO070E00030
-- Nouveau format avec P : 33/70P/3047 → 33SO070P03047, 38/20P/04 → 38SO020P00004
-- Format général : [2ch]SO[3ch avec zéros]E ou P[5ch avec zéros]. Ignorer le préfixe x/y/v.
+RÉFÉRENCES — format EXACT : [2ch][SO ou PO][3ch avec zéros][E ou P][5ch avec zéros] = 13 caractères total
+Exemples d'écriture abrégée de Matthias :
+- 33/60P/3001 → 33SO060P03001 (P précisé = remplace le E)
+- 32/40/40 → 32SO040E00040 (pas de P = E par défaut)
+- 35/530/20 → 35SO530E00020
+- 33/70P/3047 → 33SO070P03047
+- 38/20P/04 → 38SO020P00004
+Les "/" sont des SÉPARATEURS, jamais des chiffres à inclure dans la référence.
+Si la réf est écrite en entier (ex: 35SO530E00075), la copier telle quelle.
+Ignorer le préfixe x/y/v (coche de préparation).
 
 NUMÉROS DE LOT : "7" et "9" souvent confondus. 7 = trait horizontal haut + descend droit. 9 = boucle fermée en haut.
 
@@ -1922,10 +1928,15 @@ async function analyseImportPhoto(type) {
 
   const prompt = `Tu analyses une feuille manuscrite de gestion de stock pour un entrepôt d'ascenseurs.
 
-RÉFÉRENCES — format exact à reconstituer :
-- "x35/530/67" → "35SO530E00067", "x38/70/30" → "38SO070E00030"
-- Nouveau format avec P : "33/70P/3047" → "33SO070P03047", "38/20P/04" → "38SO020P00004"
-- Format général : [2ch]SO[3ch avec zéros]E ou P[5ch avec zéros]. Ignorer le préfixe x/y/v.
+RÉFÉRENCES — format EXACT : [2ch][SO ou PO][3ch avec zéros][E ou P][5ch avec zéros] = 13 caractères total
+Exemples d'écriture abrégée de Matthias :
+- 33/60P/3001 → 33SO060P03001 (P précisé = remplace le E)
+- 32/40/40 → 32SO040E00040 (pas de P = E par défaut)
+- 35/530/20 → 35SO530E00020
+- 38/20P/04 → 38SO020P00004
+Les "/" sont des SÉPARATEURS, jamais des chiffres à inclure dans la référence.
+Si la réf est écrite en entier (ex: 35SO530E00075), la copier telle quelle.
+Ignorer le préfixe x/y/v (coche de préparation).
 
 NUMÉROS DE LOT :
 - "7" et "9" souvent confondus : 7 = barre horizontale en haut + trait droit ; 9 = boucle fermée en haut
@@ -2414,14 +2425,15 @@ INFORMATIONS À EXTRAIRE :
 4. Numéro de commande / Réf. client (si présent)
 5. Toutes les lignes du tableau
 
-RÉFÉRENCES — format à reconstituer :
-- "35/530/75" → "35SO530E00075"
-- "36/570/13" → "36SO570E00013"
-- "38/70/73" → "38SO070E00073"
-- "32/40/3015" → "32SO040E03015"
-- Nouveau format avec P : "33/70P/3047" → "33SO070P03047", "38/20P/04" → "38SO020P00004"
-- Format général : [2ch]SO[3ch avec zéros]E ou P[5ch avec zéros]
-- " ou // = même référence que la ligne précédente
+RÉFÉRENCES — format EXACT : [2ch][SO ou PO][3ch avec zéros][E ou P][5ch avec zéros] = 13 caractères total
+Exemples d'écriture abrégée :
+- 33/60P/3001 → 33SO060P03001 (P précisé = remplace le E)
+- 32/40/40 → 32SO040E00040 (pas de P = E par défaut)
+- 35/530/75 → 35SO530E00075
+- 38/20P/04 → 38SO020P00004
+Les "/" sont des SÉPARATEURS, jamais des chiffres à inclure dans la référence.
+Si la réf est écrite en entier, la copier telle quelle.
+" ou // = même référence que la ligne précédente.
 
 ZONES : 
 - D2A3 = depot "2" rangee "3" (le A devant le numéro est ignoré)
@@ -3215,59 +3227,75 @@ async function imprimerBon(bonId) {
   doc.setTextColor(0);
   y += 8;
 
-  const rowH = 9;
   lignes?.forEach((l, i) => {
-    if (i % 2 === 1) {
+    // Calculer la hauteur dynamique selon le contenu
+    const refLines = doc.splitTextToSize(String(l.reference || ''), cols.ref.w - 2);
+    const rangeeLines = doc.splitTextToSize(String(l.rangee || '—'), cols.rangee.w - 2);
+    const remLines = l.remarque ? doc.splitTextToSize(String(l.remarque), cols.remarque.w - 2) : [''];
+    const maxLines = Math.max(refLines.length, rangeeLines.length, remLines.length);
+    const rowH = Math.max(9, maxLines * 5 + 4);
+
+    const indispo = l.indisponible;
+    if (indispo) {
+      doc.setFillColor(254, 226, 226);
+      doc.rect(margin, y, pageW - margin * 2, rowH, 'F');
+    } else if (i % 2 === 1) {
       doc.setFillColor(246, 248, 252);
       doc.rect(margin, y, pageW - margin * 2, rowH, 'F');
     }
 
+    const midY = y + rowH / 2 + 2;
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
-    doc.text(String(l.reference || ''), cols.ref.x + 1, y + 6);
+    doc.text(refLines, cols.ref.x + 1, y + 5);
     doc.setFont('helvetica', 'normal');
 
     doc.setFontSize(7.5);
-    doc.text(String(l.lot || '—'), cols.lot.x + 1, y + 6);
-    doc.text(String(l.conditionnement || '—'), cols.cond.x + 1, y + 6);
+    doc.text(String(l.lot || '—'), cols.lot.x + 1, midY);
+    doc.text(String(l.conditionnement || '—'), cols.cond.x + 1, midY);
 
     doc.setFontSize(8);
-    doc.text(String(l.depot || '—'), cols.depot.x + 1, y + 6);
-    doc.text(String(l.rangee || '—'), cols.rangee.x + 1, y + 6);
+    doc.text(String(l.depot || '—'), cols.depot.x + 1, midY);
+    doc.text(rangeeLines, cols.rangee.x + 1, y + 5);
 
     if (l.remarque) {
-      const rem = l.remarque.length > 22 ? l.remarque.slice(0, 20) + '...' : l.remarque;
       doc.setTextColor(80);
       doc.setFontSize(7.5);
-      doc.text(rem, cols.remarque.x + 1, y + 6);
+      doc.text(remLines, cols.remarque.x + 1, y + 5);
       doc.setTextColor(0);
       doc.setFontSize(8);
     }
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
-    doc.text(String(l.quantite), cols.qte.x + cols.qte.w / 2, y + 6, { align: 'center' });
+    doc.text(String(l.quantite), cols.qte.x + cols.qte.w / 2, midY, { align: 'center' });
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
 
-    // Case à cocher pour Matthias
-    doc.setDrawColor(100);
-    doc.rect(cols.statut.x + 1, y + 2, 6, 6);
-    doc.setDrawColor(200);
+    if (indispo) {
+      doc.setTextColor(200, 30, 30);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      const qp = l.quantite_preparee || 0;
+      doc.text(qp > 0 ? `${qp}/${l.quantite}` : 'INDISPO', cols.statut.x + 1, midY);
+    } else {
+      doc.setTextColor(20, 130, 60);
+      doc.setFont('helvetica', 'bold');
+      doc.text('OK', cols.statut.x + 1, midY);
+    }
+    doc.setTextColor(0);
+    doc.setFont('helvetica', 'normal');
 
+    doc.setDrawColor(220);
     doc.line(margin, y + rowH, pageW - margin, y + rowH);
     y += rowH;
     if (y > 272) {
-      doc.addPage();
-      y = 14;
+      doc.addPage(); y = 14;
       doc.setFillColor(30, 35, 51);
       doc.rect(margin, y, pageW - margin * 2, 8, 'F');
-      doc.setTextColor(255);
-      doc.setFontSize(8);
-      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(255); doc.setFontSize(8); doc.setFont('helvetica', 'bold');
       Object.values(cols).forEach(c => doc.text(c.label, c.x + 1, y + 5.5));
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(0);
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(0);
       y += 8;
     }
   });
@@ -3350,94 +3378,64 @@ async function genererPDF(bonId) {
   doc.setTextColor(0);
   y += 8;
 
-  let hasIndispo = false;
-  const rowH = 9;
-
   lignes?.forEach((l, i) => {
-    const indispo = l.indisponible;
-    if (indispo) hasIndispo = true;
+    // Hauteur dynamique
+    doc.setFontSize(8);
+    const refLines = doc.splitTextToSize(String(l.reference || ''), cols.ref.w - 2);
+    const rangeeLines = doc.splitTextToSize(String(l.rangee || '—'), cols.rangee.w - 2);
+    const remLines = l.remarque ? doc.splitTextToSize(String(l.remarque), cols.remarque.w - 2) : [''];
+    const maxLines = Math.max(refLines.length, rangeeLines.length, remLines.length);
+    const rowH = Math.max(9, maxLines * 5 + 4);
 
-    // Fond alternance / indispo
-    if (indispo) {
-      doc.setFillColor(254, 226, 226);
-      doc.rect(margin, y, pageW - margin * 2, rowH, 'F');
-    } else if (i % 2 === 1) {
+    if (i % 2 === 1) {
       doc.setFillColor(246, 248, 252);
       doc.rect(margin, y, pageW - margin * 2, rowH, 'F');
     }
 
+    const midY = y + rowH / 2 + 2;
     doc.setFontSize(8);
     doc.setTextColor(0);
 
-    // Référence (en gras)
     doc.setFont('helvetica', 'bold');
-    doc.text(String(l.reference || ''), cols.ref.x + 1, y + 6);
+    doc.text(refLines, cols.ref.x + 1, y + 5);
     doc.setFont('helvetica', 'normal');
 
-    // Lot
     doc.setFontSize(7.5);
-    doc.text(String(l.lot || '—'), cols.lot.x + 1, y + 6);
+    doc.text(String(l.lot || '—'), cols.lot.x + 1, midY);
+    doc.text(String(l.conditionnement || '—'), cols.cond.x + 1, midY);
 
-    // Conditionnement
-    doc.text(String(l.conditionnement || '—'), cols.cond.x + 1, y + 6);
-
-    // Dépôt
     doc.setFontSize(8);
-    doc.text(String(l.depot || '—'), cols.depot.x + 1, y + 6);
+    doc.text(String(l.depot || '—'), cols.depot.x + 1, midY);
+    doc.text(rangeeLines, cols.rangee.x + 1, y + 5);
 
-    // Emplacement (dépôt + rangée lisibles)
-    const emplacement = l.rangee ? String(l.rangee) : '—';
-    doc.text(emplacement, cols.rangee.x + 1, y + 6);
-
-    // Quantité (en gras, centré)
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.text(String(l.quantite), cols.qte.x + cols.qte.w / 2, y + 6, { align: 'center' });
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
-
-    // Remarque (tronquée)
     if (l.remarque) {
-      const rem = l.remarque.length > 22 ? l.remarque.slice(0, 20) + '…' : l.remarque;
       doc.setTextColor(80);
       doc.setFontSize(7.5);
-      doc.text(rem, cols.remarque.x + 1, y + 6);
+      doc.text(remLines, cols.remarque.x + 1, y + 5);
       doc.setTextColor(0);
       doc.setFontSize(8);
     }
 
-    // Statut
-    if (indispo) {
-      doc.setTextColor(200, 30, 30);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(7.5);
-      const qp = l.quantite_preparee || 0;
-      doc.text(qp > 0 ? `${qp}/${l.quantite}` : 'INDISPO', cols.statut.x + 1, y + 6);
-    } else {
-      doc.setTextColor(20, 130, 60);
-      doc.setFont('helvetica', 'bold');
-      doc.text('✓ OK', cols.statut.x + 1, y + 6);
-    }
-    doc.setTextColor(0);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text(String(l.quantite), cols.qte.x + cols.qte.w / 2, midY, { align: 'center' });
     doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
 
-    // Ligne séparatrice légère
+    // Case à cocher pour Matthias
+    doc.setDrawColor(100);
+    doc.rect(cols.statut.x + 1, y + (rowH - 6) / 2, 6, 6);
     doc.setDrawColor(220);
-    doc.line(margin, y + rowH, pageW - margin, y + rowH);
 
+    doc.line(margin, y + rowH, pageW - margin, y + rowH);
     y += rowH;
     if (y > 272) {
-      doc.addPage();
-      y = 14;
-      // Répéter en-tête tableau sur nouvelle page
+      doc.addPage(); y = 14;
       doc.setFillColor(30, 35, 51);
       doc.rect(margin, y, pageW - margin * 2, 8, 'F');
-      doc.setTextColor(255);
-      doc.setFontSize(8);
-      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(255); doc.setFontSize(8); doc.setFont('helvetica', 'bold');
       Object.values(cols).forEach(c => doc.text(c.label, c.x + 1, y + 5.5));
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(0);
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(0);
       y += 8;
     }
   });
