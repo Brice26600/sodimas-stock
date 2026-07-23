@@ -3231,11 +3231,10 @@ async function imprimerBon(bonId) {
     // Découper après les / pour ref et lot
     doc.setFontSize(8);
     const refStr = String(l.reference || '');
-    const refParts = refStr.match(/.{1,13}/g) || [refStr]; // ref toujours 13 chars max
-    const refLines = refParts.length > 1 ? refParts : doc.splitTextToSize(refStr, cols.ref.w - 2);
+    const refLines = splitAfterSlash(doc, refStr, cols.ref.w - 2);
 
     const lotStr = String(l.lot || '—');
-    const lotLines = doc.splitTextToSize(lotStr, cols.lot.w - 2);
+    const lotLines = splitAfterSlash(doc, lotStr, cols.lot.w - 2);
 
     const rangeeLines = doc.splitTextToSize(String(l.rangee || '—'), cols.rangee.w - 2);
     const remLines = l.remarque ? doc.splitTextToSize(String(l.remarque), cols.remarque.w - 2) : [''];
@@ -3316,6 +3315,30 @@ async function imprimerBon(bonId) {
   doc.save(`BON_PREP_${bon.destinataire.replace(/\s+/g,'_')}_${bon.date_prevue}.pdf`);
 }
 
+// Découpe un texte en lignes en coupant après les / si le texte dépasse la largeur
+function splitAfterSlash(doc, text, maxWidth) {
+  if (!text || text === '—') return [text || '—'];
+  // Si ça rentre sur une ligne, pas besoin de couper
+  const w = doc.getTextWidth(text);
+  if (w <= maxWidth) return [text];
+  // Découper aux /
+  const parts = text.split('/');
+  const lines = [];
+  let current = '';
+  for (let i = 0; i < parts.length; i++) {
+    const segment = (i < parts.length - 1) ? parts[i] + '/' : parts[i];
+    const test = current + segment;
+    if (current && doc.getTextWidth(test) > maxWidth) {
+      lines.push(current);
+      current = segment;
+    } else {
+      current = test;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.length ? lines : [text];
+}
+
 async function genererPDF(bonId) {
   const { data: bon } = await sb.from('bons_preparation').select('*').eq('id', bonId).single();
   const { data: lignes } = await sb.from('bon_lignes').select('*').eq('bon_id', bonId).order('created_at');
@@ -3387,12 +3410,12 @@ async function genererPDF(bonId) {
   y += 8;
 
   lignes?.forEach((l, i) => {
-    // Hauteur dynamique avec découpage intelligent
+    // Hauteur dynamique avec découpage après les /
     doc.setFontSize(8);
     const refStr = String(l.reference || '');
-    const refLines = doc.splitTextToSize(refStr, cols.ref.w - 2);
+    const refLines = splitAfterSlash(doc, refStr, cols.ref.w - 2);
     const lotStr = String(l.lot || '—');
-    const lotLines = doc.splitTextToSize(lotStr, cols.lot.w - 2);
+    const lotLines = splitAfterSlash(doc, lotStr, cols.lot.w - 2);
     const rangeeLines = doc.splitTextToSize(String(l.rangee || '—'), cols.rangee.w - 2);
     const remLines = l.remarque ? doc.splitTextToSize(String(l.remarque), cols.remarque.w - 2) : [''];
     const maxLines = Math.max(refLines.length, lotLines.length, rangeeLines.length, remLines.length);
