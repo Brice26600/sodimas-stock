@@ -3228,11 +3228,18 @@ async function imprimerBon(bonId) {
   y += 8;
 
   lignes?.forEach((l, i) => {
-    // Calculer la hauteur dynamique selon le contenu
-    const refLines = doc.splitTextToSize(String(l.reference || ''), cols.ref.w - 2);
+    // Découper après les / pour ref et lot
+    doc.setFontSize(8);
+    const refStr = String(l.reference || '');
+    const refParts = refStr.match(/.{1,13}/g) || [refStr]; // ref toujours 13 chars max
+    const refLines = refParts.length > 1 ? refParts : doc.splitTextToSize(refStr, cols.ref.w - 2);
+
+    const lotStr = String(l.lot || '—');
+    const lotLines = doc.splitTextToSize(lotStr, cols.lot.w - 2);
+
     const rangeeLines = doc.splitTextToSize(String(l.rangee || '—'), cols.rangee.w - 2);
     const remLines = l.remarque ? doc.splitTextToSize(String(l.remarque), cols.remarque.w - 2) : [''];
-    const maxLines = Math.max(refLines.length, rangeeLines.length, remLines.length);
+    const maxLines = Math.max(refLines.length, lotLines.length, rangeeLines.length, remLines.length);
     const rowH = Math.max(9, maxLines * 5 + 4);
 
     const indispo = l.indisponible;
@@ -3244,31 +3251,31 @@ async function imprimerBon(bonId) {
       doc.rect(margin, y, pageW - margin * 2, rowH, 'F');
     }
 
-    const midY = y + rowH / 2 + 2;
+    const topY = y + 5; // alignement vertical uniforme pour toutes les colonnes
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
-    doc.text(refLines, cols.ref.x + 1, y + 5);
+    doc.text(refLines, cols.ref.x + 1, topY);
     doc.setFont('helvetica', 'normal');
 
     doc.setFontSize(7.5);
-    doc.text(String(l.lot || '—'), cols.lot.x + 1, midY);
-    doc.text(String(l.conditionnement || '—'), cols.cond.x + 1, midY);
+    doc.text(lotLines, cols.lot.x + 1, topY);
+    doc.text(String(l.conditionnement || '—'), cols.cond.x + 1, topY);
 
     doc.setFontSize(8);
-    doc.text(String(l.depot || '—'), cols.depot.x + 1, midY);
-    doc.text(rangeeLines, cols.rangee.x + 1, y + 5);
+    doc.text(String(l.depot || '—'), cols.depot.x + 1, topY);
+    doc.text(rangeeLines, cols.rangee.x + 1, topY);
 
     if (l.remarque) {
       doc.setTextColor(80);
       doc.setFontSize(7.5);
-      doc.text(remLines, cols.remarque.x + 1, y + 5);
+      doc.text(remLines, cols.remarque.x + 1, topY);
       doc.setTextColor(0);
       doc.setFontSize(8);
     }
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
-    doc.text(String(l.quantite), cols.qte.x + cols.qte.w / 2, midY, { align: 'center' });
+    doc.text(String(l.quantite), cols.qte.x + cols.qte.w / 2, topY, { align: 'center' });
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
 
@@ -3277,11 +3284,12 @@ async function imprimerBon(bonId) {
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(7.5);
       const qp = l.quantite_preparee || 0;
-      doc.text(qp > 0 ? `${qp}/${l.quantite}` : 'INDISPO', cols.statut.x + 1, midY);
+      doc.text(qp > 0 ? `${qp}/${l.quantite}` : 'INDISPO', cols.statut.x + 1, topY);
     } else {
-      doc.setTextColor(20, 130, 60);
-      doc.setFont('helvetica', 'bold');
-      doc.text('OK', cols.statut.x + 1, midY);
+      // Case à cocher vide
+      doc.setDrawColor(80);
+      doc.rect(cols.statut.x + 1, y + (rowH - 6) / 2, 6, 6);
+      doc.setDrawColor(220);
     }
     doc.setTextColor(0);
     doc.setFont('helvetica', 'normal');
@@ -3379,12 +3387,15 @@ async function genererPDF(bonId) {
   y += 8;
 
   lignes?.forEach((l, i) => {
-    // Hauteur dynamique
+    // Hauteur dynamique avec découpage intelligent
     doc.setFontSize(8);
-    const refLines = doc.splitTextToSize(String(l.reference || ''), cols.ref.w - 2);
+    const refStr = String(l.reference || '');
+    const refLines = doc.splitTextToSize(refStr, cols.ref.w - 2);
+    const lotStr = String(l.lot || '—');
+    const lotLines = doc.splitTextToSize(lotStr, cols.lot.w - 2);
     const rangeeLines = doc.splitTextToSize(String(l.rangee || '—'), cols.rangee.w - 2);
     const remLines = l.remarque ? doc.splitTextToSize(String(l.remarque), cols.remarque.w - 2) : [''];
-    const maxLines = Math.max(refLines.length, rangeeLines.length, remLines.length);
+    const maxLines = Math.max(refLines.length, lotLines.length, rangeeLines.length, remLines.length);
     const rowH = Math.max(9, maxLines * 5 + 4);
 
     if (i % 2 === 1) {
@@ -3392,39 +3403,40 @@ async function genererPDF(bonId) {
       doc.rect(margin, y, pageW - margin * 2, rowH, 'F');
     }
 
-    const midY = y + rowH / 2 + 2;
+    const topY = y + 5; // alignement uniforme pour toutes les colonnes
     doc.setFontSize(8);
     doc.setTextColor(0);
 
     doc.setFont('helvetica', 'bold');
-    doc.text(refLines, cols.ref.x + 1, y + 5);
+    doc.text(refLines, cols.ref.x + 1, topY);
     doc.setFont('helvetica', 'normal');
 
     doc.setFontSize(7.5);
-    doc.text(String(l.lot || '—'), cols.lot.x + 1, midY);
-    doc.text(String(l.conditionnement || '—'), cols.cond.x + 1, midY);
+    doc.text(lotLines, cols.lot.x + 1, topY);
+    doc.text(String(l.conditionnement || '—'), cols.cond.x + 1, topY);
 
     doc.setFontSize(8);
-    doc.text(String(l.depot || '—'), cols.depot.x + 1, midY);
-    doc.text(rangeeLines, cols.rangee.x + 1, y + 5);
+    doc.text(String(l.depot || '—'), cols.depot.x + 1, topY);
+    doc.text(rangeeLines, cols.rangee.x + 1, topY);
 
     if (l.remarque) {
       doc.setTextColor(80);
       doc.setFontSize(7.5);
-      doc.text(remLines, cols.remarque.x + 1, y + 5);
+      doc.text(remLines, cols.remarque.x + 1, topY);
       doc.setTextColor(0);
       doc.setFontSize(8);
     }
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
-    doc.text(String(l.quantite), cols.qte.x + cols.qte.w / 2, midY, { align: 'center' });
+    doc.text(String(l.quantite), cols.qte.x + cols.qte.w / 2, topY, { align: 'center' });
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
 
-    // Case à cocher pour Matthias
-    doc.setDrawColor(100);
+    // Case à cocher vide pour Matthias
+    doc.setDrawColor(80);
     doc.rect(cols.statut.x + 1, y + (rowH - 6) / 2, 6, 6);
+    doc.setDrawColor(220);
     doc.setDrawColor(220);
 
     doc.line(margin, y + rowH, pageW - margin, y + rowH);
