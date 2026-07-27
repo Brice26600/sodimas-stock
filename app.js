@@ -43,11 +43,7 @@ async function loadProfile() {
 
   // Appliquer les restrictions lecteur dès que le profil est chargé
   if (role === 'lecteur') {
-    const pagesInterdites = ['entree', 'sortie', 'deplacement', 'historique', 'zones', 'inventaire', 'bons'];
-    pagesInterdites.forEach(page => {
-      const navItem = document.querySelector(`[data-page="${page}"]`);
-      if (navItem) navItem.style.display = 'none';
-    });
+    document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'none');
   }
 }
 
@@ -80,19 +76,7 @@ document.addEventListener('keydown', e => {
 function showApp() {
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
-
-  if (isLecteur()) {
-    // Masquer les menus non autorisés pour le lecteur
-    const pagesInterdites = ['entree', 'sortie', 'deplacement', 'historique', 'zones', 'inventaire', 'bons'];
-    pagesInterdites.forEach(page => {
-      const navItem = document.querySelector(`[data-page="${page}"]`);
-      if (navItem) navItem.style.display = 'none';
-    });
-    // Masquer aussi le bouton modifier dans la fiche article
-    navigate('stock');
-  } else {
-    navigate('dashboard');
-  }
+  navigate(isLecteur() ? 'stock' : 'dashboard');
 }
 
 // ═══════════════════════════════════════ NAVIGATION ════
