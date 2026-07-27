@@ -51,10 +51,8 @@ async function logout() {
   currentUser = null; currentProfile = null;
 }
 
-function showApp() {
-  document.getElementById('login-screen').classList.add('hidden');
-  document.getElementById('app').classList.remove('hidden');
-  navigate('dashboard');
+function isLecteur() {
+  return currentProfile?.role === 'lecteur';
 }
 
 // Auto-login si session active
@@ -70,8 +68,32 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !document.getElementById('login-screen').classList.contains('hidden')) login();
 });
 
+function showApp() {
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+
+  if (isLecteur()) {
+    // Masquer les menus non autorisés pour le lecteur
+    const pagesInterdites = ['entree', 'sortie', 'deplacement', 'historique', 'zones', 'inventaire', 'bons'];
+    pagesInterdites.forEach(page => {
+      const navItem = document.querySelector(`[data-page="${page}"]`);
+      if (navItem) navItem.style.display = 'none';
+    });
+    // Masquer aussi le bouton modifier dans la fiche article
+    navigate('stock');
+  } else {
+    navigate('dashboard');
+  }
+}
+
 // ═══════════════════════════════════════ NAVIGATION ════
 function navigate(page) {
+  // Bloquer l'accès aux pages interdites pour le lecteur
+  if (isLecteur() && !['dashboard', 'stock'].includes(page)) {
+    toast('Accès non autorisé.', 'error');
+    return;
+  }
+
   currentPage = page;
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -472,6 +494,7 @@ async function openArticle(rowId) {
       <input type="file" accept="image/*" capture="environment" style="display:none" onchange="uploadPhoto('${rowId}', this)" />
     </label>
 
+    ${!isLecteur() ? `
     <div class="form-section-title" style="margin-top:1.2rem">Modifier</div>
     <div class="form-group"><label>Référence</label>
       <input type="text" id="edit-ref" value="${r.reference || ''}" style="font-family:monospace" /></div>
@@ -493,6 +516,11 @@ async function openArticle(rowId) {
       <button class="btn-primary" onclick="saveEditStock('${rowId}')">Enregistrer</button>
       <button class="btn-secondary" onclick="closeModal()">Annuler</button>
     </div>
+    ` : `
+    <div class="form-actions" style="margin-top:1rem">
+      <button class="btn-secondary" onclick="closeModal()">Fermer</button>
+    </div>
+    `}
   `);
 }
 
