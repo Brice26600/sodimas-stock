@@ -40,6 +40,15 @@ async function loadProfile() {
   document.getElementById('user-role').textContent = role;
   document.getElementById('user-avatar').textContent = prenom[0].toUpperCase();
   document.getElementById('topbar-user').textContent = prenom;
+
+  // Appliquer les restrictions lecteur dès que le profil est chargé
+  if (role === 'lecteur') {
+    const pagesInterdites = ['entree', 'sortie', 'deplacement', 'historique', 'zones', 'inventaire', 'bons'];
+    pagesInterdites.forEach(page => {
+      const navItem = document.querySelector(`[data-page="${page}"]`);
+      if (navItem) navItem.style.display = 'none';
+    });
+  }
 }
 
 async function logout() {
