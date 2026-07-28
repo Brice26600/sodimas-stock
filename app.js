@@ -357,7 +357,7 @@ async function loadStockBatch() {
   if (stockFilters.q) query = query.or(`reference.ilike.%${stockFilters.q}%,lot.ilike.%${stockFilters.q}%,designation.ilike.%${stockFilters.q}%`);
   if (stockFilters.depot) query = query.eq('depot', stockFilters.depot);
   if (stockFilters.enStockSeulement) query = query.gt('quantite', 0);
-  query = query.order('reference').range(stockOffset, stockOffset + STOCK_PER_PAGE - 1);
+  query = query.order('quantite', { ascending: false }).order('reference').range(stockOffset, stockOffset + STOCK_PER_PAGE - 1);
 
   const { data, count } = await query;
   stockTotal = count || 0;
@@ -397,17 +397,20 @@ async function loadStockBatch() {
   data.forEach(r => {
     const reserve = r.quantite_reservee || 0;
     const dispo = r.quantite - reserve;
+    const isZero = r.quantite === 0;
+    const greyStyle = isZero ? 'opacity:0.45;' : '';
     // Ligne tableau
     if (tbody) {
       const tr = document.createElement('tr');
+      if (isZero) tr.style.opacity = '0.45';
       tr.innerHTML = `
         <td class="td-ref" style="cursor:pointer" onclick="openArticle('${r.id}')">${fmt(r.reference)}</td>
         <td class="td-lot">${fmt(r.lot)}</td>
         <td style="font-size:.78rem;color:var(--text-secondary)">${fmt(r.conditionnement)}</td>
         <td>${badgeDepot(r.depot)}</td>
         <td>${fmt(r.rangee)}</td>
-        <td style="font-size:1.05rem;font-weight:700;color:var(--accent);text-align:center">${r.quantite}</td>
-        <td style="font-size:1.05rem;font-weight:700;text-align:center;${reserve > 0 ? 'color:var(--warning)' : 'color:var(--success)'}">${dispo}${reserve > 0 ? `<br/><span style="font-size:.7rem;font-weight:400;color:var(--text-secondary)">(${reserve} en cde)</span>` : ''}</td>
+        <td style="font-size:1.05rem;font-weight:700;color:${isZero ? 'var(--text-secondary)' : 'var(--accent)'};text-align:center">${r.quantite}</td>
+        <td style="font-size:1.05rem;font-weight:700;text-align:center;${reserve > 0 ? 'color:var(--warning)' : isZero ? 'color:var(--text-secondary)' : 'color:var(--success)'}">${dispo}${reserve > 0 ? `<br/><span style="font-size:.7rem;font-weight:400;color:var(--text-secondary)">(${reserve} en cde)</span>` : ''}</td>
         <td style="max-width:180px;font-size:.8rem;color:var(--text-secondary)">${fmt(r.remarque)}</td>
         <td><button class="btn-secondary btn-sm btn-icon" title="Modifier" onclick='openArticle("${r.id}")'>✎</button></td>`;
       tbody.appendChild(tr);
@@ -416,10 +419,11 @@ async function loadStockBatch() {
     if (cards) {
       const div = document.createElement('div');
       div.className = 'stock-card';
+      if (isZero) div.style.opacity = '0.45';
       div.innerHTML = `
         <div class="stock-card-top" onclick="openArticle('${r.id}')" style="cursor:pointer">
           <span class="stock-card-ref">${fmt(r.reference)}</span>
-          <span class="stock-card-qte" style="font-size:1.5rem;font-weight:800;color:var(--accent)">${r.quantite}</span>
+          <span class="stock-card-qte" style="font-size:1.5rem;font-weight:800;color:${isZero ? 'var(--text-secondary)' : 'var(--accent)'}">${r.quantite}</span>
         </div>
         <div class="stock-card-meta">
           ${r.lot ? `<span class="stock-card-lot">Lot : ${r.lot}</span>` : ''}
