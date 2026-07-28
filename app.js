@@ -279,15 +279,17 @@ async function renderStock() {
         <button class="btn-primary btn-sm" onclick="navigate('entree')">+ Entrée</button>
       </div>
       <div class="search-bar">
-        <input type="text" id="stock-search" placeholder="Rechercher référence, lot…" value="${stockFilters.q}" oninput="onStockSearch(this.value)" />
-        <select id="stock-depot" onchange="stockFilters.depot=this.value;resetStockScroll();loadStockBatch()">
+        <input type="text" id="stock-search" placeholder="Rechercher référence, lot…" value="${stockFilters.q}" oninput="onStockSearch(this.value)" style="flex:1;min-width:0" />
+      </div>
+      <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem">
+        <select id="stock-depot" onchange="stockFilters.depot=this.value;resetStockScroll();loadStockBatch()" style="flex:1;min-width:120px">
           <option value="">Tous les dépôts</option>
         </select>
-        <label style="display:flex;align-items:center;gap:.4rem;font-size:.85rem;cursor:pointer;white-space:nowrap">
+        <label style="display:flex;align-items:center;gap:.3rem;font-size:.85rem;cursor:pointer;white-space:nowrap">
           <input type="checkbox" id="stock-en-stock" ${stockFilters.enStockSeulement ? 'checked' : ''} onchange="stockFilters.enStockSeulement=this.checked;resetStockScroll();loadStockBatch()" />
-          En stock uniquement
+          En stock
         </label>
-        <button class="btn-secondary btn-sm" onclick="resetStockFilters()">Réinitialiser</button>
+        <button class="btn-secondary btn-sm" onclick="resetStockFilters()">✕</button>
       </div>
       <div id="stock-count" style="font-size:.82rem;color:var(--text-secondary);margin-bottom:.6rem"></div>
       <div id="stock-table-wrap"></div>
@@ -398,11 +400,10 @@ async function loadStockBatch() {
     const reserve = r.quantite_reservee || 0;
     const dispo = r.quantite - reserve;
     const isZero = r.quantite === 0;
-    const greyStyle = isZero ? 'opacity:0.45;' : '';
     // Ligne tableau
     if (tbody) {
       const tr = document.createElement('tr');
-      if (isZero) tr.style.opacity = '0.45';
+      if (isZero) tr.style.backgroundColor = '#f0f0f0';
       tr.innerHTML = `
         <td class="td-ref" style="cursor:pointer" onclick="openArticle('${r.id}')">${fmt(r.reference)}</td>
         <td class="td-lot">${fmt(r.lot)}</td>
@@ -419,24 +420,24 @@ async function loadStockBatch() {
     if (cards) {
       const div = document.createElement('div');
       div.className = 'stock-card';
-      if (isZero) div.style.opacity = '0.45';
+      if (isZero) div.style.backgroundColor = '#f0f0f0';
       div.innerHTML = `
         <div class="stock-card-top" onclick="openArticle('${r.id}')" style="cursor:pointer">
           <span class="stock-card-ref">${fmt(r.reference)}</span>
-          <span class="stock-card-qte" style="font-size:1.5rem;font-weight:800;color:${isZero ? 'var(--text-secondary)' : 'var(--accent)'}">${r.quantite}</span>
+          <div style="display:flex;align-items:center;gap:.5rem">
+            <span class="stock-card-qte" style="font-size:1.5rem;font-weight:800;color:${isZero ? 'var(--text-secondary)' : 'var(--accent)'}">${r.quantite}</span>
+            <button class="btn-secondary btn-sm btn-icon" onclick='event.stopPropagation();openArticle("${r.id}")' style="padding:.3rem .5rem">✎</button>
+          </div>
         </div>
-        <div class="stock-card-meta">
-          ${r.lot ? `<span class="stock-card-lot">Lot : ${r.lot}</span>` : ''}
-          ${r.conditionnement ? `<span class="badge" style="background:var(--accent-light);color:var(--accent)">${r.conditionnement}</span>` : ''}
-          <span class="badge badge-depot">${r.depot || '—'}</span>
-          ${r.rangee ? `<span class="stock-card-rangee">Rangée ${r.rangee}</span>` : ''}
-          ${reserve > 0 ? `<span style="font-size:.78rem;color:var(--warning)">Disponible: ${dispo} (${reserve} en cde)</span>` : ''}
+        ${r.lot ? `<div style="font-size:.82rem;color:var(--text-secondary);margin:.2rem 0">📦 Lot : <strong>${r.lot}</strong></div>` : ''}
+        <div style="display:flex;align-items:center;gap:.5rem;margin:.2rem 0">
+          <span style="font-size:.82rem">📍</span>
+          ${r.depot ? `<span class="badge badge-depot" style="font-size:.82rem">${r.depot}</span>` : ''}
+          ${r.rangee ? `<span style="font-size:.88rem;font-weight:600">Rangée ${r.rangee}</span>` : ''}
+          ${r.conditionnement ? `<span class="badge" style="background:var(--accent-light);color:var(--accent);font-size:.78rem">${r.conditionnement}</span>` : ''}
         </div>
-        ${r.photos?.length ? `<div style="margin:.4rem 0"><img src="${r.photos[0]}" style="width:48px;height:48px;object-fit:cover;border-radius:4px;opacity:.85" /></div>` : ''}
-        ${r.remarque ? `<div class="stock-card-remarque">${r.remarque}</div>` : ''}
-        <div class="stock-card-actions">
-          <button class="btn-secondary btn-sm" onclick='openArticle("${r.id}")'>✎ Modifier</button>
-        </div>`;
+        ${reserve > 0 ? `<div style="font-size:.78rem;color:var(--warning);margin:.2rem 0">Disponible: ${dispo} (${reserve} en cde)</div>` : ''}
+        ${r.remarque ? `<div style="font-size:.78rem;color:var(--text-secondary);margin-top:.3rem;border-top:1px solid var(--border);padding-top:.3rem">${r.remarque}</div>` : ''}`;
       cards.appendChild(div);
     }
   });
