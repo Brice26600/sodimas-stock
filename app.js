@@ -413,7 +413,10 @@ async function loadStockBatch() {
         <td style="font-size:1.05rem;font-weight:700;color:${isZero ? 'var(--text-secondary)' : 'var(--accent)'};text-align:center">${r.quantite}</td>
         <td style="font-size:1.05rem;font-weight:700;text-align:center;${reserve > 0 ? 'color:var(--warning)' : isZero ? 'color:var(--text-secondary)' : 'color:var(--success)'}">${dispo}${reserve > 0 ? `<br/><span style="font-size:.7rem;font-weight:400;color:var(--text-secondary)">(${reserve} en cde)</span>` : ''}</td>
         <td style="max-width:180px;font-size:.8rem;color:var(--text-secondary)">${fmt(r.remarque)}</td>
-        <td><button class="btn-secondary btn-sm btn-icon" title="Modifier" onclick='openArticle("${r.id}")'>✎</button></td>`;
+        <td style="display:flex;gap:.3rem">
+          <button class="btn-secondary btn-sm btn-icon" title="Modifier" onclick='openArticle("${r.id}")'>✎</button>
+          <button class="btn-secondary btn-sm btn-icon" title="Historique" onclick='showHistoriqueArticle("${r.reference}","${r.lot || ''}")' style="font-weight:700;color:var(--accent)">ℹ</button>
+        </td>`;
       tbody.appendChild(tr);
     }
     // Carte mobile
@@ -427,6 +430,7 @@ async function loadStockBatch() {
           <div style="display:flex;align-items:center;gap:.5rem">
             <span class="stock-card-qte" style="font-size:1.5rem;font-weight:800;color:${isZero ? 'var(--text-secondary)' : 'var(--accent)'}">${r.quantite}</span>
             <button class="btn-secondary btn-sm btn-icon" onclick='event.stopPropagation();openArticle("${r.id}")' style="padding:.3rem .5rem">✎</button>
+            <button class="btn-secondary btn-sm btn-icon" onclick='event.stopPropagation();showHistoriqueArticle("${r.reference}","${r.lot || ''}")' style="padding:.3rem .5rem;font-weight:700;color:var(--accent)">ℹ</button>
           </div>
         </div>
         ${r.lot ? `<div style="font-size:.82rem;color:var(--text-secondary);margin:.2rem 0">📦 Lot : <strong>${r.lot}</strong></div>` : ''}
@@ -460,6 +464,75 @@ function resetStockFilters() {
 
 const CLOUDINARY_CLOUD = 'dbmeib7ap';
 const CLOUDINARY_PRESET = 'sodimas_photos';
+
+async function showHistoriqueArticle(reference, lot) {
+  lot = lot || null;
+  let query = sb.from('mouvements').select('*').eq('reference', reference);
+  if (lot) query = query.eq('lot', lot); else query = query.is('lot', null);
+  const { data: mouvements } = await query.order('date_mouvement', { ascending: false }).order('created_at', { ascending: false });
+
+  let sq = sb.from('stock').select('*').eq('reference', reference);
+  if (lot) sq = sq.eq('lot', lot); else sq = sq.is('lot', null);
+  const { data: stockRows } = await sq;
+  const stockTotal = stockRows?.reduce((s, r) => s + (r.quantite || 0), 0) || 0;
+
+  const typeIcon = { entree: '📥', sortie: '📤', deplacement: '↔️', inventaire: '📋' };
+  const typeLabel = { entree: 'Entrée', sortie: 'Sortie', deplacement: 'Déplacement', inventaire: 'Inventaire' };
+  const typeColor = { entree: 'var(--success)', sortie: 'var(--danger)', deplacement: 'var(--accent)', inventaire: 'var(--text-secondary)' };
+
+  openModal(`Historique — ${reference}${lot ? ` / ${lot}` : ''}`, `
+    <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;flex-wrap:wrap">
+      <div style="background:var(--accent-light);border-radius:var(--radius);padding:.5rem 1rem;text-align:center">
+        <div style="font-size:.75rem;color:var(--text-secondary)">Stock actuel</div>
+        <div style="font-size:1.4rem;font-weight:800;color:var(--accent)">${stockTotal}</div>
+      </div>
+      ${(stockRows || []).map(r => `
+        <div style="font-size:.82rem;color:var(--text-secondary)">
+          📍 <strong>${r.depot || '—'}</strong>${r.rangee ? `/${r.rangee}` : ''}
+          ${r.conditionnement ? ` · ${r.conditionnement}` : ''}
+          : <strong>${r.quantite}</strong>
+        </div>
+      `).join('')}
+    </div>
+
+    ${mouvements?.length ? `
+      <div style="max-height:420px;overflow-y:auto">
+        <table>
+          <thead><tr>
+            <th>Date</th><th>Type</th><th>Qté</th><th>Détails</th><th>Par</th>
+          </tr></thead>
+          <tbody>
+            ${mouvements.map(m => {
+              let details = '';
+              if (m.type_mouvement === 'deplacement') {
+                details = `${m.depot_origine || m.depot || '—'} → ${m.depot_destination || '—'}`;
+                if (m.rangee_origine || m.rangee_destination) details += `<br/><span style="font-size:.75rem;color:var(--text-secondary)">${m.rangee_origine || ''} → ${m.rangee_destination || ''}</span>`;
+              } else if (m.type_mouvement === 'sortie') {
+                details = m.remarque ? `<span style="color:var(--text-secondary);font-size:.82rem">${m.remarque}</span>` : `${m.depot || '—'}${m.rangee ? `/${m.rangee}` : ''}`;
+              } else {
+                details = `${m.depot || '—'}${m.rangee ? `/${m.rangee}` : ''}`;
+                if (m.remarque) details += `<br/><span style="font-size:.75rem;color:var(--text-secondary)">${m.remarque}</span>`;
+              }
+              return `<tr>
+                <td style="white-space:nowrap;font-size:.82rem">${fmtDate(m.date_mouvement)}</td>
+                <td style="white-space:nowrap">
+                  <span style="color:${typeColor[m.type_mouvement] || 'var(--text-secondary)'}">
+                    ${typeIcon[m.type_mouvement] || '•'} ${typeLabel[m.type_mouvement] || m.type_mouvement}
+                  </span>
+                </td>
+                <td style="font-weight:700;color:${m.type_mouvement === 'sortie' ? 'var(--danger)' : m.type_mouvement === 'entree' ? 'var(--success)' : 'var(--accent)'};text-align:center">
+                  ${m.type_mouvement === 'sortie' ? '-' : '+'}${m.quantite}
+                </td>
+                <td style="font-size:.82rem">${details}</td>
+                <td style="font-size:.78rem;color:var(--text-secondary)">${m.auteur || '—'}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    ` : `<p style="color:var(--text-secondary);text-align:center;padding:1rem">Aucun mouvement enregistré.</p>`}
+  `);
+}
 
 async function openArticle(rowId) {
   const { data: r } = await sb.from('stock').select('*').eq('id', rowId).single();
@@ -1071,8 +1144,10 @@ async function saveDeplacement() {
     type_mouvement: 'deplacement',
     reference: r.reference, lot: r.lot,
     depot: newDepot, rangee: newRangee || null,
+    depot_origine: r.depot || null, rangee_origine: r.rangee || null,
+    depot_destination: newDepot, rangee_destination: newRangee || null,
     quantite: r.quantite,
-    remarque: remarque || `Déplacé de ${r.depot}→${newDepot}`,
+    remarque: remarque || null,
     auteur: currentProfile?.prenom || currentUser?.email,
     source: 'app'
   });
