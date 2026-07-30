@@ -171,6 +171,67 @@ function emptyState(msg) {
 }
 
 // ═══════════════════════════════════════ DASHBOARD ════
+async function exporterStockExcel() {
+  toast('Génération du fichier Excel…');
+
+  // Récupérer tout le stock avec quantité > 0
+  const { data, error } = await sb.from('stock')
+    .select('reference, lot, conditionnement, depot, rangee, quantite, quantite_reservee, remarque')
+    .gt('quantite', 0)
+    .order('quantite', { ascending: false })
+    .order('reference');
+
+  if (error || !data?.length) {
+    toast('Aucun article en stock.', 'error');
+    return;
+  }
+
+  // Charger SheetJS si pas encore chargé
+  if (!window.XLSX) {
+    await new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+      script.onload = resolve;
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+  }
+
+  const date = new Date().toLocaleDateString('fr-FR').replace(/\//g, '-');
+
+  // Préparer les données
+  const rows = data.map(r => ({
+    'Référence': r.reference || '',
+    'N° de lot': r.lot || '',
+    'Conditionnement': r.conditionnement || '',
+    'Dépôt': r.depot || '',
+    'Rangée': r.rangee || '',
+    'Stock': r.quantite,
+    'Disponible': r.quantite - (r.quantite_reservee || 0),
+    'Remarque': r.remarque || ''
+  }));
+
+  const ws = window.XLSX.utils.json_to_sheet(rows);
+
+  // Largeurs des colonnes
+  ws['!cols'] = [
+    { wch: 18 }, // Référence
+    { wch: 14 }, // Lot
+    { wch: 14 }, // Conditionnement
+    { wch: 10 }, // Dépôt
+    { wch: 10 }, // Rangée
+    { wch: 8 },  // Stock
+    { wch: 12 }, // Disponible
+    { wch: 30 }, // Remarque
+  ];
+
+  const wb = window.XLSX.utils.book_new();
+  window.XLSX.utils.book_append_sheet(wb, ws, 'Stock SODIMAS');
+  window.XLSX.writeFile(wb, `Stock_SODIMAS_${date}.xlsx`);
+
+  toast(`Export réussi — ${data.length} articles`);
+}
+
 async function renderDashboard() {
   const el = document.getElementById('page-dashboard');
   el.innerHTML = spinner();
@@ -276,6 +337,7 @@ async function renderStock() {
     <div class="card">
       <div class="card-header">
         <div class="card-title">Stock actuel</div>
+        <button class="btn-secondary btn-sm" onclick="exporterStockExcel()">📊 Exporter Excel</button>
         <button class="btn-primary btn-sm" onclick="navigate('entree')">+ Entrée</button>
       </div>
       <div class="search-bar">
