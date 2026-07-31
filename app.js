@@ -1194,12 +1194,36 @@ async function saveDeplacement() {
 
   if (!newDepot) { toast('Le nouveau dépôt est obligatoire.', 'error'); return; }
 
-  const { error } = await sb.from('stock').update({
-    depot: newDepot, rangee: newRangee || null,
-    updated_at: new Date().toISOString()
-  }).eq('id', r.id);
+  // Vérifier si une ligne existe déjà à la destination (même ref+lot+conditionnement)
+  let destQuery = sb.from('stock').select('id, quantite').eq('reference', r.reference);
+  destQuery = r.lot ? destQuery.eq('lot', r.lot) : destQuery.is('lot', null);
+  destQuery = destQuery.eq('depot', newDepot);
+  destQuery = newRangee ? destQuery.eq('rangee', newRangee) : destQuery.is('rangee', null);
+  destQuery = r.conditionnement ? destQuery.eq('conditionnement', r.conditionnement) : destQuery.is('conditionnement', null);
+  destQuery = r.remarque ? destQuery.eq('remarque', r.remarque) : destQuery.is('remarque', null);
+  const { data: destRows } = await destQuery.limit(1);
+  const destExisting = destRows?.[0];
 
-  if (error) { toast('Erreur : ' + error.message, 'error'); return; }
+  if (destExisting && destExisting.id !== r.id) {
+    // Fusion : additionner les quantités à destination et supprimer la ligne source
+    const { error } = await sb.from('stock').update({
+      quantite: destExisting.quantite + r.quantite,
+      updated_at: new Date().toISOString()
+    }).eq('id', destExisting.id);
+    if (error) { toast('Erreur : ' + error.message, 'error'); return; }
+
+    // Supprimer la ligne source
+    await sb.from('stock').delete().eq('id', r.id);
+    toast(`Fusionné avec la ligne existante en ${newDepot}${newRangee ? '/' + newRangee : ''} — total : ${destExisting.quantite + r.quantite}`);
+  } else {
+    // Déplacer simplement la ligne
+    const { error } = await sb.from('stock').update({
+      depot: newDepot, rangee: newRangee || null,
+      updated_at: new Date().toISOString()
+    }).eq('id', r.id);
+    if (error) { toast('Erreur : ' + error.message, 'error'); return; }
+    toast(`Article déplacé vers ${newDepot}${newRangee ? ' / ' + newRangee : ''}`);
+  }
 
   await sb.from('mouvements').insert({
     date_mouvement: new Date().toISOString().slice(0,10),
@@ -1214,7 +1238,6 @@ async function saveDeplacement() {
     source: 'app'
   });
 
-  toast(`Article déplacé vers ${newDepot}${newRangee ? ' / ' + newRangee : ''}`);
   cancelDeplacement();
 }
 
